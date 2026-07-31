@@ -1,0 +1,10 @@
+.git
+.gitignore
+vendor
+ai
+unit_tests
+**/*.o
+CoppeliaSim*
+*.ttt
+*.ttm
+docker-compose.yml

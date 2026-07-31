@@ -1,0 +1,23 @@
+# Build output
+*.o
+*.d
+ai
+unit_tests
+
+# The simulator API binaries are redistributed by their author, not by this
+# repository. Drop them in vendor/ locally; see docs/05-simulator-setup.md.
+vendor/
+
+# Simulator scenes and installs are large binary blobs and do not belong in
+# version control -- a previous incarnation of this project committed an
+# entire CoppeliaSim install, then had to rewrite history to remove it.
+CoppeliaSim*/
+*.ttt
+*.ttm
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
