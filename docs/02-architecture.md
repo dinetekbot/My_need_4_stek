@@ -87,19 +87,20 @@ you want to know *why it is like that*, read the source.
 ## The state machine
 
 ```
-                    forward < reverse_dist
+            no forward progress for blind_cycles,
+            or forward < reverse_dist
        ┌──────────────────────────────────────────┐
        │                                          ▼
   ┌────┴─────┐                            ┌───────────────┐
   │  RACING  │                            │   REVERSING   │
   └────┬─────┘◄───────────────────────────┴───────┬───────┘
-       │        forward > reverse_dist × 1.8      │
+       │   gap found AND forward > reverse_dist×1.8│
        │                                          │
-       │ no gap for deadend_cycles                │ no gap, and
-       │                                          │ enough clearance
+       │ deadend_attempts failed recoveries       │ max_reverse_cycles
+       │                                          │ of getting nowhere
        ▼                                          │
   ┌───────────┐◄──────────────────────────────────┘
-  │  HALTING  │  back off until 1m of clearance, then settle
+  │  HALTING  │  back off to a legal clearance, then settle
   └────┬──────┘
        │
        ▼
@@ -108,22 +109,30 @@ you want to know *why it is like that*, read the source.
   └────────────┘
 ```
 
-Two details that are easy to get wrong:
+The governing invariant is that **the car is never idle**: every racing cycle
+either commands forward motion or hands over to a recovery. Progress is
+measured from the commanded throttle rather than inferred from a distance
+threshold, which is what closes the band between "too close to accelerate" and
+"close enough to reverse" — a band the first version parked itself in.
+
+Three details that are easy to get wrong:
 
 **Hysteresis on the reverse exit.** Leaving `REVERSING` at exactly the
 distance that entered it makes the car shuffle forwards and backwards on the
-threshold forever. The exit distance is 1.8× the entry distance.
+threshold forever. The exit needs 1.8× the entry distance *and* a visible gap,
+or the car lurches straight back into the wall it just escaped.
+
+**Recoveries, not cycles.** A dead end is a number of failed recover-and-retry
+attempts, not a number of bad scans; and a clean stretch of racing clears the
+count, so a track full of tight corners cannot accumulate its way into a false
+dead end.
 
 **Clearance before halting.** The rules require the car to come to rest at
-least three feet from the wall before ending the simulation. `HALTING` keeps
-backing up until it has that clearance, then holds still for a few cycles to
-be sure it has actually stopped, and only then declares itself finished. A car
-that halts with its bumper against the wall has failed the run even though it
-did stop.
-
-On the cycle where a transition happens, the command sent is all zeros — the
-car coasts for one cycle rather than acting on a decision made by the state it
-is leaving.
+least three feet from the wall. `HALTING` backs up to a 25% margin — without
+it the car coasts back over the line and never settles — but also gives up on
+the margin once reversing stops gaining ground, because there is no rear
+sensor and a corner can wedge the car short of it indefinitely. Insisting on
+the ideal outcome there means never terminating at all.
 
 ## Failure handling
 
@@ -131,7 +140,7 @@ is leaving.
 |---|---|
 | Unparseable response line | Treated as a failed request |
 | Lidar reply with fewer than 32 values | Cycle skipped; driving on a partial scan is worse than not driving |
-| Every ray reads as faulty | Cycle skipped, throttle zeroed — this is a broken sensor, not a car in a box |
+| Every ray reads as faulty | Cycle skipped, throttle zeroed, and a warning printed — this is a broken sensor, not a car in a box. One supplied scene does exactly this, and failing silently in a loop is indistinguishable from a hang |
 | 100 consecutive bad reads | Give up, exit 84 |
 | Pipe closed | `SIGPIPE` ignored, so it surfaces as a write error we can report |
 | `SIGINT` / `SIGTERM` | Leave the loop, stop the car, end the simulation cleanly |

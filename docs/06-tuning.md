@@ -36,9 +36,34 @@ much harder to debug.
 | Option | Default | Effect |
 |---|---|---|
 | `--smooth` | 3 | Moving average width, in rays. Higher is steadier but blurs narrow openings. 1 disables. |
-| `--bubble` | 260 | Safety radius in mm around the closest obstacle. **The single most impactful parameter.** |
-| `--gap-threshold` | 1200 | How far a ray must reach to count as drivable, in mm. |
+| `--bubble` | 260 | Safety radius in mm around the closest obstacle. |
+| `--gap-threshold` | 800 | How far a ray must reach to count as drivable, in mm. **The single most impactful parameter.** |
 | `--lidar-floor` | 1 | Distance substituted for a faulty reading. Rarely worth changing. |
+| `--mirror` | on | Left/right convention. See [perception](03-perception.md#which-end-is-the-left). |
+
+**Start with `--gap-threshold`, and set it from the track, not from taste.**
+It has to sit below the depth of the tightest corridor the car must drive
+through, or the gap search flickers on and off from one cycle to the next and
+the car crawls in fits.
+
+The default was 1200 until a real run showed what that does on a track whose
+corridors are about 1.1m deep:
+
+```
+[00250] RACING  fwd=1225 gap=yes@+000.9 wheels=+0.063 thr=0.188
+[00251] RACING  fwd=1125 gap= no        wheels=+0.063 thr=0.000
+[00252] RACING  fwd=1125 gap= no        wheels=+0.063 thr=0.000
+[00253] RACING  fwd=1125 gap=yes@-014.1 wheels=-0.187 thr=0.157
+[00254] RACING  fwd=1125 gap= no        wheels=-0.187 thr=0.000
+```
+
+The forward distance is sitting right on the threshold, so half the scans find
+nothing. Dropping it to 800 turned that same track from *285 cycles, six
+recoveries, dead end* into *44 cycles, no recoveries, track cleared*.
+
+To pick a value: run with `--verbose`, watch the `fwd` column through the
+tightest part of the track, and set the threshold comfortably below the
+smallest value you see there.
 
 **`--bubble` too low** — the car clips walls on the inside of corners, and
 eventually touches one.
@@ -57,7 +82,7 @@ picks openings the car does not fit through.
 
 | Option | Default | Effect |
 |---|---|---|
-| `--kp` | 0.85 | How hard the car turns for a given heading error. |
+| `--kp` | 1.5 | How hard the car turns for a given heading error. |
 | `--kd` | 0.35 | Damping. Raise this when the car weaves. |
 | `--balance` | 0.12 | Corridor centring weight. |
 | `--steer-rate` | 0.25 | Maximum change of `WHEELS_DIR` per cycle. |
@@ -81,11 +106,32 @@ have gone too far: D also damps the response you want.
 | Option | Default | Effect |
 |---|---|---|
 | `--throttle-min` | 0.15 | Slowest racing power. |
-| `--throttle-max` | 1.0 | Fastest. |
-| `--dist-slow` | 600 | Distance mapped to `throttle-min`, mm. |
+| `--throttle-max` | 0.55 | Fastest. |
+| `--dist-slow` | 700 | Distance mapped to `throttle-min`, mm. |
 | `--dist-fast` | 2600 | Distance mapped to `throttle-max`, mm. |
 | `--turn-penalty` | 0.55 | Fraction of throttle given up at full lock. |
-| `--brake-dist` | 320 | Below this, throttle is cut entirely, mm. |
+| `--brake-dist` | 600 | Below this, drop to a crawl, mm. |
+| `--crawl-power` | 0.10 | Power used while crawling past an obstacle. |
+
+**The thresholds must be ordered**, or whole bands of behaviour become
+unreachable:
+
+```
+reverse-dist  <  brake-dist  <=  dist-slow  <  dist-fast
+     400           600            700           2600
+```
+
+Put `dist-slow` below `brake-dist` and the entire `throttle-min` region sits
+inside the braking region, so the slow end of the ramp never runs. There is an
+assertion for this in the test suite, which is where that mistake was caught.
+
+**`--throttle-max` is 0.55, not 1.0, and that is a measurement.** At full
+power the car covered roughly 1.1m per control cycle, and the loop runs at
+about two cycles per second against a live simulator. A car that moves more
+than a metre between decisions cannot brake for anything: it went from 3010mm
+of clear road to 396mm in six cycles, with the controller doing everything
+right the whole way down. Speed is bounded by your loop rate before it is
+bounded by the engine.
 
 Going faster is mostly not about `--throttle-max`. The car is rarely limited
 by top speed; it is limited by how late it brakes and how well it holds a
@@ -107,17 +153,26 @@ must start before reversing does, so keep `brake-dist > reverse-dist`.
 
 | Option | Default | Effect |
 |---|---|---|
-| `--reverse-dist` | 260 | Below this, back up, mm. |
+| `--reverse-dist` | 400 | Below this, back up, mm. |
 | `--reverse-power` | 0.35 | Power used while reversing. |
-| `--deadend-cycles` | 12 | Consecutive gapless cycles before declaring a dead end. |
+| `--blind-cycles` | 4 | Cycles making no progress before backing up. |
+| `--max-reverse-cycles` | 40 | Cycles spent reversing before giving up on it. |
+| `--deadend-attempts` | 6 | Failed recoveries before declaring a dead end. |
+| `--recovery-reset` | 20 | Clean racing cycles that clear the recovery counter. |
 | `--deadend-clearance` | 1000 | Clearance required before ending the simulation, mm. |
 | `--laps` | 0 | Stop after N laps. 0 means run until told otherwise. |
-| `--mirror` | off | Flip the left/right convention. |
 | `--verbose` | off | One telemetry line per cycle on stderr. |
 
-**`--deadend-cycles` too low** and the car gives up in corners it could have
-taken; a single gapless scan is noise, not a wall. **Too high** and it spends
-a long time nudging a dead end before accepting it.
+**`--blind-cycles` must stay small.** It is not a "be sure it is really a
+wall" timer — creeping forward while the gap search returns nothing is driving
+blind, and the wall does not move away while you wait. Four cycles is enough
+to reject noise.
+
+**`--deadend-attempts` too low** and the car gives up in corners it could have
+taken. **Too high** and it spends a long time nudging a genuine dead end
+before accepting it. Note it counts *recoveries*, not cycles, and
+`--recovery-reset` clears it after a clean stretch — so a track with many
+tight corners does not accumulate its way into a false dead end.
 
 **`--deadend-clearance` is a rule, not a preference.** The car must come to
 rest at least three feet from the wall. Lowering it below 1000 mm risks
@@ -156,11 +211,14 @@ Nothing needs to be recompiled to change track, so keep the configurations
 that work:
 
 ```bash
-# track_1 -- wide and gentle, room to be aggressive
-scripts/run.sh -- --dist-fast=2200 --turn-penalty=0.45
+# bootstrap_track -- short, three checkpoints, the one to tune against
+scripts/run.sh -- --verbose
 
-# criss_cross -- tight, sharp corners, be conservative
-scripts/run.sh -- --bubble=320 --dist-fast=3000 --turn-penalty=0.65 --kd=0.5
+# tighter corridors: let the gap search see further into them
+scripts/run.sh -- --gap-threshold=600 --brake-dist=500 --bubble=200
+
+# more room: carry more speed
+scripts/run.sh -- --dist-fast=2200 --turn-penalty=0.45
 ```
 
 A single set of parameters that finishes every track is a better result than a

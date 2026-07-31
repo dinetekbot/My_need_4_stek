@@ -25,6 +25,20 @@ static const double REVERSE_EXIT_FACTOR = 1.8;
 /* Cycles spent stationary before we accept that the car has actually stopped
 ** and the simulation can be ended. */
 static const int HALT_SETTLE_CYCLES = 5;
+/*
+** While halting we back up to this multiple of the required clearance before
+** starting to count settling cycles.
+**
+** Without the margin the car backs up to exactly the legal distance, stops
+** reversing, coasts forward a few centimetres, drops below the line, backs up
+** again -- and never settles. Observed on a real track: eighty cycles of
+** shuffling between 950mm and 1150mm before the count happened to complete.
+*/
+static const double HALT_CLEARANCE_MARGIN = 1.25;
+/* Clearance gain, in millimetres, that counts as reversing still working. */
+static const double HALT_PROGRESS_MM = 20.0;
+/* Consecutive cycles of getting nowhere before we settle for what we have. */
+static const int HALT_STALL_CYCLES = 8;
 
 void controller_init(controller_t *ctl)
 {
@@ -112,26 +126,72 @@ double throttle_command(const scan_t *scan, double wheels, const config_t *cfg)
     return clampd(power, 0.0, cfg->throttle_max);
 }
 
-/* Racing: follow the gap, and watch for the two ways it can go wrong. */
+/*
+** Racing.
+**
+** The governing rule is that the car must never sit still doing nothing. An
+** earlier version had two separate thresholds -- cut the throttle below
+** `brake_dist`, start reversing below `reverse_dist` -- which left a band
+** between them where the car was neither driving nor recovering. On a real
+** track it parked itself in that band, 300mm from a wall, and waited there
+** until a timer expired. Twenty wasted cycles, and nothing in the telemetry
+** said why.
+**
+** So progress is measured, not assumed: any cycle that does not actually
+** command forward motion counts as stuck, whatever the reason, and enough of
+** them triggers a recovery.
+*/
 static void step_racing(controller_t *ctl, const scan_t *scan,
     const gap_t *gap, const config_t *cfg, command_t *out)
 {
-    if (!gap->found)
-        ctl->blind_cycles++;
-    else
-        ctl->blind_cycles = 0;
-    /* About to touch a wall: stop arguing about the racing line and back off. */
-    if (scan->forward_mm < cfg->reverse_dist_mm) {
-        ctl->state = DRIVE_REVERSING;
-        return;
+    bool moving;
+
+    if (gap->found) {
+        out->wheels = steering_command(ctl, scan, gap, cfg);
+        out->throttle = throttle_command(scan, out->wheels, cfg);
+        /* Closer than the braking distance, but there is still a way out.
+        ** Crawl rather than stop: the car has to be rolling for the steering
+        ** to do anything at all, and stopping dead in front of a wall we
+        ** already know how to get around achieves nothing. */
+        if (out->throttle <= 0.0 && scan->forward_mm >= cfg->reverse_dist_mm)
+            out->throttle = cfg->crawl_power;
+    } else {
+        /*
+        ** No gap, or too close to the wall for power to be safe. Hold the
+        ** last steering angle and coast.
+        **
+        ** Note what does *not* happen here: the car does not creep forward.
+        ** Driving into space the gap search could not find is driving blind,
+        ** and it is how a recoverable situation becomes a collision.
+        */
+        out->wheels = ctl->last_wheels;
+        out->throttle = 0.0;
     }
-    /* No opening anywhere for long enough that it cannot be sensor noise. */
-    if (ctl->blind_cycles >= cfg->deadend_cycles) {
+    moving = out->throttle > 0.0;
+    if (moving) {
+        ctl->stuck_cycles = 0;
+        ctl->good_cycles++;
+        /* A decent stretch of ordinary racing means whatever the car was
+        ** caught in, it is out. Forgive the earlier recovery attempts. */
+        if (ctl->good_cycles >= cfg->recovery_reset_cycles)
+            ctl->recoveries = 0;
+    } else {
+        ctl->stuck_cycles++;
+        ctl->good_cycles = 0;
+    }
+    if (scan->forward_mm >= cfg->reverse_dist_mm
+        && ctl->stuck_cycles < cfg->blind_cycles)
+        return;
+    /* Recovery needed. Repeated recoveries without a clean stretch in
+    ** between mean backing up is not working: this is a dead end. */
+    if (ctl->recoveries >= cfg->deadend_attempts) {
         ctl->state = DRIVE_HALTING;
+        ctl->halt_cycles = 0;
         return;
     }
-    out->wheels = steering_command(ctl, scan, gap, cfg);
-    out->throttle = throttle_command(scan, out->wheels, cfg);
+    ctl->state = DRIVE_REVERSING;
+    ctl->recoveries++;
+    ctl->reverse_cycles = 0;
 }
 
 /*
@@ -142,14 +202,19 @@ static void step_racing(controller_t *ctl, const scan_t *scan,
 static void step_reversing(controller_t *ctl, const scan_t *scan,
     const gap_t *gap, const config_t *cfg, command_t *out)
 {
-    if (scan->forward_mm > cfg->reverse_dist_mm * REVERSE_EXIT_FACTOR) {
+    ctl->reverse_cycles++;
+    /* Out of trouble: room ahead *and* somewhere to aim. Requiring both
+    ** stops the car from lurching forward into the same wall again. */
+    if (gap->found
+        && scan->forward_mm > cfg->reverse_dist_mm * REVERSE_EXIT_FACTOR) {
         ctl->state = DRIVE_RACING;
+        ctl->stuck_cycles = 0;
         return;
     }
-    /* Backed far enough out of a genuine dead end to stop legally. */
-    if (ctl->blind_cycles >= cfg->deadend_cycles
-        && scan->forward_mm >= cfg->deadend_clearance_mm) {
+    /* Backing up is not helping either. */
+    if (ctl->reverse_cycles >= cfg->max_reverse_cycles) {
         ctl->state = DRIVE_HALTING;
+        ctl->halt_cycles = 0;
         return;
     }
     out->wheels = -heading_error(gap);
@@ -160,11 +225,39 @@ static void step_reversing(controller_t *ctl, const scan_t *scan,
 /*
 ** Halting: come to rest, but not with the bumper against the wall -- the
 ** rules require at least three feet of clearance before the simulation is
-** ended, so we creep backwards until we have it.
+** ended, so we creep backwards until we have it, with a margin.
 */
 static void step_halting(controller_t *ctl, const scan_t *scan,
     const config_t *cfg, command_t *out)
 {
+    double target = cfg->deadend_clearance_mm * HALT_CLEARANCE_MARGIN;
+    bool legal = scan->forward_mm >= cfg->deadend_clearance_mm;
+
+    /* Track whether backing up is still buying clearance. */
+    if (scan->forward_mm > ctl->halt_best_mm + HALT_PROGRESS_MM) {
+        ctl->halt_best_mm = scan->forward_mm;
+        ctl->halt_stalls = 0;
+    } else {
+        ctl->halt_stalls++;
+    }
+    /*
+    ** Still backing up towards the margin -- unless reversing has stopped
+    ** achieving anything.
+    **
+    ** There is no rear sensor. The car reverses blind, and in a corner it
+    ** ends up wedged against a wall it cannot see, with the forward distance
+    ** stuck short of the margin. Observed on a real track: 250 cycles of
+    ** reversing against something at a constant 1125mm. So once reversing
+    ** stops gaining ground, we settle for the clearance we have, provided it
+    ** is legal.
+    */
+    if (ctl->halt_cycles == 0 && scan->forward_mm < target
+        && !(legal && ctl->halt_stalls >= HALT_STALL_CYCLES)) {
+        out->reverse = cfg->reverse_power;
+        return;
+    }
+    /* Settling, but coasted back below the legal line: recover the margin
+    ** and start the count again. */
     if (scan->forward_mm < cfg->deadend_clearance_mm) {
         out->reverse = cfg->reverse_power;
         ctl->halt_cycles = 0;

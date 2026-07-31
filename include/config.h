@@ -43,15 +43,42 @@ typedef struct {
     double dist_slow_mm;      /* forward distance mapping to throttle_min  */
     double dist_fast_mm;      /* forward distance mapping to throttle_max  */
     double turn_penalty;      /* how much a full lock cuts the throttle    */
-    double brake_dist_mm;     /* below this, cut the throttle entirely     */
+    double brake_dist_mm;     /* below this, drop to a crawl               */
+    /*
+    ** Power used when closer than brake_dist but still able to see a way out.
+    **
+    ** Not zero, and that matters. A stationary car with its wheels turned
+    ** goes nowhere: cutting the throttle completely near a wall prevents the
+    ** exact manoeuvre needed to get round it, and the car sits in the corner
+    ** steering at an opening it never reaches. Just enough power to rotate,
+    ** not enough to hurt if the gap turns out to be wrong.
+    */
+    double crawl_power;
     double reverse_dist_mm;   /* below this, back up out of trouble        */
     double reverse_power;     /* CAR_BACKWARDS power used when reversing   */
 
     /* ---- race management ----------------------------------------------- */
 
-    /* A dead end is declared when no drivable gap is found for this many
-    ** consecutive cycles. One bad scan is noise; ten in a row is a wall. */
-    int    deadend_cycles;
+    /*
+    ** Consecutive gapless cycles before the car stops trying to go forward
+    ** and backs up to look again. One bad scan is noise; a few in a row means
+    ** the nose is pointed at something.
+    **
+    ** This must be small. Creeping forward while the gap search is returning
+    ** nothing is driving blind, and the wall does not move out of the way
+    ** while you wait to be sure.
+    */
+    int    blind_cycles;
+    /* Cycles to spend backing up before concluding that reversing is not
+    ** helping either, and that this really is a dead end. */
+    int    max_reverse_cycles;
+    /* Number of reverse-and-retry attempts, without a clean stretch of
+    ** racing in between, before declaring a dead end. */
+    int    deadend_attempts;
+    /* Untroubled racing cycles that clear the attempt counter: proof that
+    ** the car got out of whatever it was stuck in rather than merely
+    ** twitching between two flavours of stuck. */
+    int    recovery_reset_cycles;
     /* We must come to rest at least this far from the wall before ending
     ** the simulation in a dead end. The rulebook says three feet. */
     double deadend_clearance_mm;
@@ -73,7 +100,11 @@ typedef struct {
     **
     ** It is implemented by reversing the scan, so every other function in the
     ** project can assume "index 0 is on the left, positive steers right".
-    ** See docs/03-perception.md for the experiment that settles it.
+    **
+    ** Default: on. Measured against the N4S simulator, where leaving it off
+    ** makes the car steer into the first corner it meets. Set --mirror=0 if
+    ** your setup is wired the other way round. See docs/03-perception.md for
+    ** the experiment.
     */
     bool   mirror;
     /* Print a telemetry line per cycle on stderr. */

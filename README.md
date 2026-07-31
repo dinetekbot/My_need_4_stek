@@ -41,7 +41,7 @@ are the entire output. Everything between the two is in this repository.
 git clone <this repository>
 cd lidar-racer
 make                # builds ./ai
-make test           # 900+ assertions, no simulator required
+make test           # 948 assertions, no simulator required
 ```
 
 To actually drive, you need the simulator and the API binaries — see
@@ -52,10 +52,15 @@ place:
 scripts/run.sh -- --verbose --laps=3
 ```
 
+Real output from a cleared track:
+
 ```
-[00071] RACING    fwd=  2410 near=  812 gap=yes@-04.7 wheels=-0.121 thr=0.836 rev=0.000 laps=0
-[00072] RACING    fwd=  2290 near=  790 gap=yes@-06.6 wheels=-0.184 thr=0.771 rev=0.000 laps=0
-[00073] RACING    fwd=  1980 near=  733 gap=yes@-10.3 wheels=-0.281 thr=0.652 rev=0.000 laps=0
+[00030] RACING    fwd=  3010 near=   850 gap=yes@-004.7 wheels=-0.187 thr=0.493 rev=0.000 laps=0
+[00031] RACING    fwd=  3007 near=   650 gap=yes@+006.6 wheels=+0.123 thr=0.513 rev=0.000 laps=0
+[00032] RACING    fwd=  2923 near=   612 gap=yes@+008.4 wheels=+0.123 thr=0.501 rev=0.000 laps=0
+        >>> checkpoint (laps=0)
+[00039] RACING    fwd=   975 near=   875 gap=yes@+008.4 wheels=+0.292 thr=0.174 rev=0.000 laps=0
+        >>> TRACK CLEARED (laps=0)
 ```
 
 ---
@@ -79,11 +84,13 @@ small-scale autonomous racing. Each cycle:
 5. **Set the power.** A distance-to-throttle curve, reduced in proportion to
    how hard the car is turning.
 
-A small state machine sits on top: `RACING` → `REVERSING` when a wall gets too
-close, → `HALTING` when there has been no gap for long enough that it cannot
-be sensor noise. Halting backs off until there is a metre of clearance before
-ending the simulation, because stopping with the bumper against the wall is a
-failed run even though the car did stop.
+A small state machine sits on top: `RACING` → `REVERSING` whenever the car
+stops making progress, for any reason; → `HALTING` once backing up and
+retrying has failed enough times to count as a genuine dead end. Halting backs
+off until it has a metre of clearance before ending the simulation — stopping
+with the bumper against the wall is a failed run even though the car did
+stop — and settles for the clearance it can actually reach, since reversing is
+blind and a corner can wedge the car short of the ideal.
 
 ---
 
@@ -121,14 +128,66 @@ every cycle, as is tempting, spends half the loop waiting for two constants.
 left, and whether a positive steering value turns right, are both
 undocumented. That looks like four cases but is really two — mirroring the
 perception and mirroring the action cancel out, so only the combination is
-observable. `--mirror` covers it.
+observable. `--mirror` covers it, and it defaults to on because that is what
+the simulator turned out to need: with it off, the car steers into the first
+corner within three cycles, every time.
 
 **Every threshold is a command line option.** Tuning a car by editing
 constants and rebuilding turns a ten-minute job into an evening. The option
 table also generates `--help` and the telemetry dump, so they cannot drift
 apart.
 
+**The car is never idle.** Every cycle it either commands forward motion or is
+recovering. This sounds obvious and is the rule the first version broke: with
+one threshold to cut the throttle and a lower one to start reversing, there is
+a band between them where the car does neither. It parked itself in that band,
+300mm from a wall, and waited twenty cycles for a timer — with nothing in the
+telemetry explaining why, because no single rule was being violated.
+
+**It never drives without a gap, and never stops when it has one.** Two halves
+of the same idea. Creeping forward when the gap search found nothing is
+driving blind. But stopping dead when a gap *is* visible is just as wrong: a
+stationary car with its wheels turned goes nowhere, so cutting the throttle
+near a wall prevents the exact manoeuvre needed to get round it. Below the
+braking distance with a gap in sight, the car crawls.
+
+**Speed is bounded by the loop rate, not the engine.** At full power the car
+covered about 1.1m per control cycle, and the loop runs at roughly two cycles
+per second against a live simulator — so it went from 3010mm of clear road to
+396mm in six cycles, with the controller doing everything correctly the whole
+way down. `--throttle-max` defaults to 0.55 for that reason.
+
 ---
+
+## Results
+
+Measured against CoppeliaSim 4.1 with the N4S API, ODE physics, default
+settings, at roughly two control cycles per second:
+
+| Scene | Result |
+|---|---|
+| `bootstrap_track` | **Track cleared**, 44 cycles, 22 s, zero recoveries |
+| `criss_cross` | 2 of 3 checkpoints, then a clean dead-end stop |
+| `track_3` | drives 1205 cycles with 3 recoveries and no dead ends, reaching 2 of 12 checkpoints — safe but slow |
+| `track_4`, `diamond_bonus` | drive continuously for 380+ cycles, 0–7 recoveries, not run long enough to clear |
+| `track_1` | the scene itself will not load |
+| `track_2` | the scene's lidar returns nothing but zeros |
+
+The two broken scenes are broken independently of this code: `track_1` fails
+to load into CoppeliaSim at all, and `track_2` loads but its sensor never
+reports. `track_1` is the scene the original project instructions tell you to
+open first.
+
+The honest reading of the long tracks: the car is **safe but slow** on them.
+It never wedges itself and never falsely declares a dead end, but it takes a
+lot of cycles per checkpoint. Follow-the-gap drives down the middle of the
+corridor rather than along a racing line, and the throttle is deliberately
+conservative because the control loop only runs at about two cycles per
+second. Going faster is a tuning exercise, and
+[docs/06-tuning.md](docs/06-tuning.md) says which knobs pay first.
+
+Every default was set from a measurement, not a guess, and that document
+records which measurement and why.
 
 ## Testing
 
@@ -142,7 +201,7 @@ response
 perception
 control
 
-921 checks, 0 failed
+948 checks, 0 failed
 OK
 ```
 
@@ -151,9 +210,14 @@ and every state machine transition are covered by assertions on hand-written
 inputs. A car that understeers in a 3D simulator tells you nothing about which
 of five stages is wrong; a failing assertion tells you exactly.
 
-What the tests do **not** cover is whether the resulting car is fast, or
-whether it completes a given track. That needs the simulator, and it is
-judged by watching it.
+Several of these tests are regressions written *after* a real run exposed
+something the unit tests could not have caught on their own — the idle band
+between the braking and reversing thresholds, driving forward with no gap, the
+halting loop that never settles. Each one names the failure it prevents.
+
+What the tests still do **not** cover is whether the resulting car is fast, or
+whether it completes a given track. That needs the simulator. See
+[Results](#results).
 
 ---
 

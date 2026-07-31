@@ -20,6 +20,10 @@ static void plain_config(config_t *cfg)
 {
     config_defaults(cfg);
     cfg->smooth_window = 1;
+    /* Pin the ray order rather than inheriting the platform default: these
+    ** tests are about geometry, not about which way round the real sensor
+    ** happens to be wired. */
+    cfg->mirror = false;
 }
 
 static void fill(double *ranges, double value)

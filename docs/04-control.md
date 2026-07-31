@@ -165,14 +165,49 @@ See [tuning](06-tuning.md) for the method.
 ## The state machine
 
 ```
-   RACING ──── forward < reverse_dist ────▶ REVERSING
-      ▲                                        │
-      └──── forward > reverse_dist × 1.8 ──────┘
-      │
-      └─ no gap for deadend_cycles ─▶ HALTING ─▶ FINISHED
+   RACING ──── no progress for blind_cycles ────▶ REVERSING
+      ▲          or forward < reverse_dist          │
+      └──── gap found AND forward > reverse_dist×1.8 ┘
+      │                                              │
+      │                        reversing isn't working
+      └── deadend_attempts recoveries ─▶ HALTING ◀───┘
+                                            │
+                                            ▼
+                                        FINISHED
 ```
 
-**`RACING`** runs the two laws above.
+**`RACING`** runs the two laws above, under one governing rule: **the car is
+never idle**. Every cycle it either commands forward motion or is recovering.
+
+That rule came from a real failure. An earlier version cut the throttle below
+`brake_dist` and started reversing below `reverse_dist`, which leaves a band
+between the two where the car does neither. On a real track it parked itself
+in that band, 300mm from a wall, and sat there:
+
+```
+[00021] RACING  fwd=300 near=283 gap= no  wheels=+0.005 thr=0.000 rev=0.000
+[00022] RACING  fwd=297 near=283 gap= no  wheels=+0.005 thr=0.000 rev=0.000
+...                                (twenty identical cycles)
+[00040] RACING  fwd=300 near=283 gap= no  wheels=+0.006 thr=0.000 rev=0.000
+```
+
+Nothing in that telemetry says what is wrong, because nothing *is* wrong by
+any single rule — it is the gap between two rules. So progress is now measured
+rather than inferred: any cycle that does not command forward motion counts as
+stuck, whatever the reason, and `blind_cycles` of them triggers a recovery.
+
+Two behaviours follow from the same rule:
+
+**Never drive without a gap.** If the gap search found nothing, the throttle
+is zero — not `throttle_min`, not "creep and see". Driving into space the
+perception layer failed to make sense of is how a recoverable situation
+becomes a collision.
+
+**Crawl rather than stop.** If a gap *is* visible but the wall is closer than
+`brake_dist`, the car applies `crawl_power` instead of nothing. A stationary
+car with its wheels turned goes nowhere: cutting the throttle completely near
+a wall prevents the exact manoeuvre needed to get around it. This is the
+difference between taking a tight corner and stopping in front of it.
 
 **`REVERSING`** backs out of trouble. One counter-intuitive line:
 
@@ -186,19 +221,39 @@ left, the wheels go right. Getting this sign wrong produces a car that
 reverses itself deeper into the corner it was trying to escape — and it looks
 like a perception bug, which is where you will waste the afternoon.
 
-The exit threshold is 1.8× the entry threshold. Without that hysteresis the
-car shuffles forwards and backwards on the boundary indefinitely.
+The exit threshold is 1.8× the entry threshold, and it also requires a gap to
+be visible. Without that hysteresis the car shuffles forwards and backwards on
+the boundary indefinitely; without the gap condition it lurches forward into
+the same wall it just backed away from.
 
-**`HALTING`** ends the run in a dead end. The requirement is to stop at least
-three feet from the wall without touching it, so halting is not just "set
-throttle to zero" — the car keeps backing up until it has a metre of
-clearance, then holds still for five cycles to confirm it has actually
-stopped, and only then declares itself finished.
+**`HALTING`** ends the run in a dead end, and it is fiddlier than it sounds.
+The requirement is to stop at least three feet from the wall without touching
+it, so halting is not "set throttle to zero". Two real failures shaped it:
 
-**Persistence before declaring a dead end.** One scan with no gap is noise —
-a reflection, a glitch, a moment where the bubble covered everything.
-`--deadend-cycles` (12) consecutive gapless cycles is a wall. Reacting to the
-first one ends races in the middle of perfectly drivable corners.
+*Backing up to exactly the legal distance never settles.* The car reverses to
+1000mm, stops reversing, coasts forward a few centimetres, drops below the
+line, reverses again. Observed: eighty cycles of shuffling between 950mm and
+1150mm. Fixed by backing up to a 25% margin, so ordinary coasting stays legal.
+
+*The margin is not always reachable.* There is no rear sensor. The car
+reverses blind, and in a corner it wedges against a wall it cannot see, with
+the forward distance stuck short of the margin forever:
+
+```
+[00403] HALTING  fwd=1125 near=1050 rev=0.350
+[00404] HALTING  fwd=1125 near=1125 rev=0.350
+[00405] HALTING  fwd=1125 near=1050 rev=0.350    (250 more of these)
+```
+
+So halting also watches whether reversing is still buying clearance. Once it
+stops gaining ground, the car settles for what it has, provided that is legal.
+Insisting on the ideal outcome here means never terminating at all.
+
+**Recoveries, not cycles.** A dead end is declared after
+`--deadend-attempts` reverse-and-retry cycles that never lead anywhere — not
+after a fixed number of gapless scans. And a clean stretch of racing
+(`--recovery-reset` cycles) clears the counter, because a track with several
+tight corners should not accumulate its way into a false dead end.
 
 **`FINISHED`** is also entered directly, from any state, when `Track Cleared`
 arrives or the lap limit is reached — those are noticed by the race loop,

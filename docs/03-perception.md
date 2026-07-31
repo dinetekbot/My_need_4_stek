@@ -67,9 +67,32 @@ Only the combination is observable, so one flag covers it. `--mirror` reverses
 the scan array; every other function in the codebase then assumes "index 0 is
 on the left, positive steers right".
 
-**The experiment:** start a race with default settings and watch the first
-corner. If the car turns consistently *into* the wall it should be avoiding,
-add `--mirror`. It takes one run to settle, and it stays settled.
+**The experiment:** start a race and watch the first corner. If the car turns
+consistently *into* the wall it should be avoiding, flip the flag. It takes
+one run to settle, and it stays settled.
+
+**The measurement.** On the N4S simulator the convention turns out to be the
+mirrored one, so `--mirror` defaults to **on**. This was not guessed. With it
+off, the car steers into the first corner within three cycles:
+
+```
+[00001] RACING  fwd=3010 near= 725 gap=yes@+000.9 wheels=+0.068 thr=0.529
+[00002] RACING  fwd=3007 near= 688 gap=yes@+006.6 wheels=+0.318 thr=0.454
+[00003] RACING  fwd= 500 near= 283 gap=yes@+027.2 wheels=+0.568 thr=0.100
+[00004] REVERSING ...
+```
+
+With it on, from the same starting position, it drives:
+
+```
+[00001] RACING  fwd=2923 near= 725 gap=yes@-002.8 wheels=-0.187 thr=0.482
+[00005] RACING  fwd=3010 near= 850 gap=yes@-004.7 wheels=-0.187 thr=0.493
+[00009] RACING  fwd=3010 near= 688 gap=yes@+006.6 wheels=+0.123 thr=0.513
+```
+
+The signature to look for is `near` collapsing while the steering keeps
+pushing in the same direction: that is a car steering confidently at what it
+believes is open space. Set `--mirror=0` if your setup is wired the other way.
 
 ## Stage 1 — cleaning
 

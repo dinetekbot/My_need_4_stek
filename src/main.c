@@ -100,6 +100,40 @@ static int apply_command(const command_t *cmd)
     return 0;
 }
 
+static const char *checkpoint_name(n4s_checkpoint_t event)
+{
+    switch (event) {
+    case N4S_CP_FIRST:        return "first checkpoint";
+    case N4S_CP_INTERMEDIATE: return "checkpoint";
+    case N4S_CP_LAP:          return "lap complete";
+    case N4S_CP_TRACK:        return "TRACK CLEARED";
+    default:                  return "none";
+    }
+}
+
+/*
+** Announce track progress as it happens.
+**
+** Without this the telemetry shows a car driving along and then, with no
+** explanation, a clean exit -- and you cannot tell a completed track from a
+** crash. Progress arrives attached to arbitrary responses, so the only place
+** it can be observed is here, by watching the tracker change.
+*/
+static void report_progress(const config_t *cfg, n4s_checkpoint_t *last)
+{
+    n4s_checkpoint_t event = n4s_track_last_event();
+    char line[128];
+
+    if (event == *last)
+        return;
+    *last = event;
+    if (!cfg->verbose || event == N4S_CP_NONE)
+        return;
+    snprintf(line, sizeof(line), "        >>> %s (laps=%d)\n",
+        checkpoint_name(event), n4s_track_laps());
+    log_line(line);
+}
+
 /* True once the race is over for a reason the controller cannot see. */
 static bool race_is_over(const config_t *cfg)
 {
@@ -136,12 +170,14 @@ static int probe_car(const config_t *cfg)
 }
 
 /* One iteration of the race loop. Returns 0 to continue, 1 to stop, -1 on error. */
-static int race_cycle(controller_t *ctl, const config_t *cfg, int *faults)
+static int race_cycle(controller_t *ctl, const config_t *cfg, int *faults,
+    n4s_checkpoint_t *last_event)
 {
     double raw[N4S_LIDAR_RAYS];
     scan_t scan;
     gap_t gap;
     command_t cmd;
+    char message[160];
 
     if (n4s_get_lidar(raw) != 0) {
         (*faults)++;
@@ -149,8 +185,24 @@ static int race_cycle(controller_t *ctl, const config_t *cfg, int *faults)
     }
     *faults = 0;
     scan_build(&scan, raw, cfg);
-    if (scan_is_faulty(&scan, cfg))
+    if (scan_is_faulty(&scan, cfg)) {
+        /*
+        ** Say so, and keep saying so periodically.
+        **
+        ** A scene whose lidar reports nothing but zeros -- it happens -- used
+        ** to leave the car sitting silently with the throttle at zero and no
+        ** output whatsoever, which is indistinguishable from a hang. Never
+        ** fail quietly in a loop.
+        */
+        ctl->faulty_scans++;
+        if (ctl->faulty_scans == 1 || ctl->faulty_scans % 50 == 0) {
+            snprintf(message, sizeof(message),
+                "warning: lidar returned no usable reading (%ld times); "
+                "is the scene's sensor working?\n", ctl->faulty_scans);
+            log_line(message);
+        }
         return (n4s_set_throttle(0.0) == 0) ? 0 : -1;
+    }
     scan_apply_bubble(&scan, cfg);
     scan_find_gap(&scan, cfg, &gap);
     controller_step(ctl, &scan, &gap, cfg, &cmd);
@@ -158,6 +210,7 @@ static int race_cycle(controller_t *ctl, const config_t *cfg, int *faults)
         return -1;
     if (cfg->verbose)
         report_telemetry(ctl, &scan, &gap, &cmd);
+    report_progress(cfg, last_event);
     if (race_is_over(cfg))
         ctl->state = DRIVE_FINISHED;
     return (ctl->state == DRIVE_FINISHED) ? 1 : 0;
@@ -165,11 +218,12 @@ static int race_cycle(controller_t *ctl, const config_t *cfg, int *faults)
 
 static int race(controller_t *ctl, const config_t *cfg)
 {
+    n4s_checkpoint_t last_event = N4S_CP_NONE;
     int faults = 0;
     int status;
 
     while (!g_interrupted) {
-        status = race_cycle(ctl, cfg, &faults);
+        status = race_cycle(ctl, cfg, &faults, &last_event);
         if (status < 0)
             return -1;
         if (status > 0)

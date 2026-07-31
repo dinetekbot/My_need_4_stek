@@ -58,13 +58,21 @@ static const option_t OPTIONS[] = {
     {"turn-penalty", OPT_DOUBLE, offsetof(config_t, turn_penalty),
         "fraction of throttle given up at full lock"},
     {"brake-dist", OPT_DOUBLE, offsetof(config_t, brake_dist_mm),
-        "mm; cut the throttle below this"},
+        "mm; drop to a crawl below this"},
+    {"crawl-power", OPT_DOUBLE, offsetof(config_t, crawl_power),
+        "power used while crawling past an obstacle, [0;1]"},
     {"reverse-dist", OPT_DOUBLE, offsetof(config_t, reverse_dist_mm),
         "mm; start backing up below this"},
     {"reverse-power", OPT_DOUBLE, offsetof(config_t, reverse_power),
         "CAR_BACKWARDS power while reversing, [0;1]"},
-    {"deadend-cycles", OPT_INT, offsetof(config_t, deadend_cycles),
-        "consecutive gapless cycles before declaring a dead end"},
+    {"blind-cycles", OPT_INT, offsetof(config_t, blind_cycles),
+        "cycles making no progress before backing up"},
+    {"max-reverse-cycles", OPT_INT, offsetof(config_t, max_reverse_cycles),
+        "cycles to spend reversing before giving up on it"},
+    {"deadend-attempts", OPT_INT, offsetof(config_t, deadend_attempts),
+        "failed recoveries before declaring a dead end"},
+    {"recovery-reset", OPT_INT, offsetof(config_t, recovery_reset_cycles),
+        "clean racing cycles that clear the recovery counter"},
     {"deadend-clearance", OPT_DOUBLE, offsetof(config_t, deadend_clearance_mm),
         "mm; required clearance before ending the simulation"},
     {"laps", OPT_INT, offsetof(config_t, lap_limit),
@@ -85,23 +93,27 @@ void config_defaults(config_t *cfg)
     cfg->lidar_floor_mm = 1.0;
     cfg->smooth_window = 3;
     cfg->bubble_mm = 260.0;
-    cfg->gap_threshold_mm = 1200.0;
-    cfg->steer_kp = 0.85;
+    cfg->gap_threshold_mm = 800.0;
+    cfg->steer_kp = 1.50;
     cfg->steer_kd = 0.35;
     cfg->steer_balance = 0.12;
     cfg->steer_rate_limit = 0.25;
     cfg->throttle_min = 0.15;
-    cfg->throttle_max = 1.0;
-    cfg->dist_slow_mm = 600.0;
+    cfg->throttle_max = 0.55;
+    cfg->dist_slow_mm = 700.0;
     cfg->dist_fast_mm = 2600.0;
     cfg->turn_penalty = 0.55;
-    cfg->brake_dist_mm = 320.0;
-    cfg->reverse_dist_mm = 260.0;
+    cfg->brake_dist_mm = 600.0;
+    cfg->crawl_power = 0.10;
+    cfg->reverse_dist_mm = 400.0;
     cfg->reverse_power = 0.35;
-    cfg->deadend_cycles = 12;
+    cfg->blind_cycles = 4;
+    cfg->max_reverse_cycles = 40;
+    cfg->deadend_attempts = 6;
+    cfg->recovery_reset_cycles = 20;
     cfg->deadend_clearance_mm = 1000.0;
     cfg->lap_limit = 0;
-    cfg->mirror = false;
+    cfg->mirror = true;
     cfg->verbose = false;
 }
 

@@ -35,10 +35,16 @@ typedef struct {
 typedef struct {
     drive_state_t state;
     double        last_wheels;
-    double        last_error;    /* previous heading error, for the D term */
-    int           blind_cycles;  /* consecutive cycles without a gap       */
-    int           halt_cycles;   /* consecutive cycles spent stationary    */
-    long          cycles;        /* total cycles executed                  */
+    double        last_error;     /* previous heading error, for the D term  */
+    int           stuck_cycles;   /* consecutive cycles making no progress   */
+    int           halt_cycles;    /* consecutive cycles spent stationary     */
+    int           reverse_cycles; /* cycles spent in the current reverse     */
+    int           recoveries;     /* reverses since the last clean stretch   */
+    double        halt_best_mm;   /* best clearance reached while halting    */
+    int           halt_stalls;    /* halting cycles that gained no clearance */
+    int           good_cycles;    /* consecutive untroubled racing cycles    */
+    long          cycles;         /* total cycles executed                   */
+    long          faulty_scans;   /* lidar reads with nothing usable in them */
 } controller_t;
 
 void controller_init(controller_t *ctl);

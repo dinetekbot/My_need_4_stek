@@ -29,40 +29,91 @@ cd CoppeliaSim_Edu_V4_1_0_Ubuntu20_04
 ./coppeliaSim.sh
 ```
 
-Two notes before you spend an evening on this.
+The archive is about 150 MB and unpacks to 455 MB. On a current Fedora it
+needed no extra packages at all — every library it wants (`libGL`, `libX11`,
+the `xcb` family, `libxkbcommon-x11`, `fontconfig`, `nss`) was already
+present. Check before you go hunting:
 
-**It is a 2020 build.** On a modern distribution it may want Qt5 and X11
-libraries that are no longer installed by default. The error you get is a
-missing `.so` at startup; install the named library and try again. On Fedora
-and Arch this is usually two or three packages.
+```bash
+LD_LIBRARY_PATH=$PWD ldd coppeliaSim | grep "not found"
+```
 
-**Never commit it.** It is a ~2 GB directory of binaries. An earlier
-incarnation of this project committed the entire install, and removing it
-later meant rewriting history. `.gitignore` already covers `CoppeliaSim*/` and
-`*.ttt`.
+Silence means you are fine. Two plugins (`BlueZero`, `Image`) fail to load and
+neither matters here.
 
-## Configuring the scene
+**Never commit it.** An earlier incarnation of this project committed the
+entire install and had to rewrite history to remove it. `.gitignore` already
+covers `CoppeliaSim*/` and `*.ttt`.
 
-Two settings, both easy to miss, both worth getting right.
+### Startup dialogs will hang it
 
-**1. Select the ODE physics engine.**
+Out of the box, `system/usrset.txt` has `suppressStartupDialogs = false`.
+CoppeliaSim then blocks on a modal dialog during startup — the remote API port
+opens and accepts connections, but every request returns an error, and the
+main thread sits in a futex forever. It looks like a crash and is not one.
+
+Set these in `system/usrset.txt` before the first run:
+
+```
+suppressStartupDialogs = true
+doNotShowUpdateCheckMessage = true
+doNotShowCrashRecoveryMessage = true
+```
+
+## Loading a scene
+
+**The command line argument does not survive a path with spaces.**
+`coppeliaSim.sh` does not quote it, so a scene under `~/my projects/` arrives
+as two arguments and is silently ignored — you get an empty scene and the API
+reports `5:KO:SimComponent Loading Failure`. Keep the scenes somewhere without
+spaces.
+
+```bash
+./coppeliaSim.sh ~/n4s-scenes/bootstrap_track.ttt
+```
+
+Headless (`-h`) works and is much faster to iterate with, but it ignores the
+scene argument entirely. To drive it headless, load the scene over the remote
+API instead — CoppeliaSim ships the Python bindings under
+`programming/remoteApiBindings/python/`:
+
+```python
+import sim
+cid = sim.simxStart('127.0.0.1', 19997, True, True, 5000, 5)
+sim.simxLoadScene(cid, '/home/you/n4s-scenes/bootstrap_track.ttt', 0,
+                  sim.simx_opmode_blocking)
+sim.simxSetIntegerParameter(cid, sim.sim_intparam_dynamic_engine, 1,
+                            sim.simx_opmode_blocking)   # 1 = ODE
+```
+
+### Check the physics engine
 
 ```
 Simulation → Using the ODE physics engine
 ```
 
-The car's suspension and tyre friction were built for ODE. Under the default
-engine it handles noticeably worse, and you will find yourself tuning the
-controller to compensate for the wrong physics.
+The car's suspension and tyre friction were built for ODE; under another
+engine you end up tuning the controller to compensate for the wrong physics.
+The supplied scenes are already saved with ODE selected — worth confirming
+rather than assuming.
 
-**2. Load a track.**
+### Not every supplied scene works
 
-```
-File → Open scene…  →  scene/track_1.ttt
-```
+Of the eight scenes shipped with the API package, two are unusable:
 
-`track_1` is the gentle one — start there. `criss_cross` and the bonus scenes
-are considerably harder and are the ones worth testing a dead-end handler on.
+| Scene | State |
+|---|---|
+| `bootstrap_track` | works — 3 checkpoints, the one to tune against |
+| `criss_cross` | works — 3 checkpoints, tight |
+| `diamond_bonus` | works — 3 checkpoints |
+| `track_3`, `track_4` | work — 12 checkpoints each |
+| `8_bonus` | works — 11 checkpoints |
+| **`track_1`** | **will not load at all** (`simxLoadScene` fails; 0 objects) |
+| **`track_2`** | **loads, but its lidar returns nothing but zeros** |
+
+`track_1` is the one the original instructions tell you to open first, which
+is worth knowing before concluding that your AI is broken. Start with
+`bootstrap_track`.
 
 Leave CoppeliaSim running with the scene loaded. Do **not** press its own play
 button: `START_SIMULATION`, sent by the AI, does that.
