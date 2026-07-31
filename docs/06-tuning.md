@@ -219,6 +219,25 @@ scripts/run.sh -- --gap-threshold=600 --brake-dist=500 --bubble=200
 
 # more room: carry more speed
 scripts/run.sh -- --dist-fast=2200 --turn-penalty=0.45
+
+# 8_bonus -- very tight. Forward distance never exceeds ~870mm anywhere on
+# the track, so the default thresholds leave the car crawling permanently and
+# finding no gaps. Everything scales down together.
+scripts/run.sh -- --gap-threshold=400 --brake-dist=300 --reverse-dist=200 \
+                  --bubble=120 --dist-slow=350 --dist-fast=800
+```
+
+That last one is the general lesson: **the distance thresholds are a set, and
+they scale with the track.** On `8_bonus` the defaults produced 215 cycles, 15
+gapless ones and no checkpoint at all; scaled down, the same car made a
+checkpoint with zero gapless cycles. Nothing about the controller changed.
+
+To find the scale for an unfamiliar track, run once with `--verbose` and look
+at the `fwd` column:
+
+```bash
+scripts/run.sh -- --verbose 2>&1 | grep -oP 'fwd=\s*\K[0-9]+' \
+  | sort -n | awk 'NR==1{print "min", $1} END{print "max", $1}'
 ```
 
 A single set of parameters that finishes every track is a better result than a

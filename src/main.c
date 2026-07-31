@@ -236,6 +236,8 @@ int main(int argc, char **argv)
 {
     config_t cfg;
     controller_t ctl;
+    n4s_response_t start;
+    char banner[256];
     int parsed;
 
     config_defaults(&cfg);
@@ -249,9 +251,17 @@ int main(int argc, char **argv)
         config_dump(&cfg);
     if (probe_car(&cfg) != 0)
         return EXIT_ERROR;
-    if (n4s_start_simulation() != 0) {
-        log_line("error: could not start the simulation "
-            "(is CoppeliaSim running with a track scene loaded?)\n");
+    if (n4s_start_simulation(&start) != 0) {
+        /* Report what the simulator said, not what we assume it meant. The
+        ** API distinguishes "no scene", "not enough checkpoints", "map failed
+        ** to load" and "network unreachable"; collapsing all of them into one
+        ** guess sends the reader looking in the wrong place. */
+        snprintf(banner, sizeof(banner),
+            "error: could not start the simulation -- the API said: "
+            "%d:%s:%s\n", start.value_id, start.ok ? "OK" : "KO", start.code);
+        log_line(banner);
+        log_line("       check that CoppeliaSim has a valid track scene "
+            "loaded and its simulation stopped.\n");
         return EXIT_ERROR;
     }
     controller_init(&ctl);

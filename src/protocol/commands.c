@@ -52,17 +52,34 @@ void n4s_track_reset(void)
 /* Commands                                                            */
 /* ------------------------------------------------------------------ */
 
-int n4s_start_simulation(void)
+/* Attempts before giving up on starting. A scene that has just been loaded,
+** or a previous run that was killed mid-race, can leave the simulator
+** refusing to start for a moment and then working normally. */
+#define START_ATTEMPTS 5
+
+int n4s_start_simulation(n4s_response_t *out)
 {
     n4s_response_t response;
 
-    if (n4s_request("START_SIMULATION", &response) != 0)
-        return -1;
-    /* Being already up is a success from our point of view: it happens when
-    ** the simulation was started by hand before the AI was launched. */
-    if (!response.ok && response.value_id != N4S_ID_ALREADY_RUNNING)
-        return -1;
-    return 0;
+    for (int attempt = 0; attempt < START_ATTEMPTS; attempt++) {
+        if (n4s_request("START_SIMULATION", &response) != 0)
+            return -1;
+        if (out != NULL)
+            *out = response;
+        /* Being already up is a success from our point of view: it happens
+        ** when the simulation was started by hand before the AI was run. */
+        if (response.ok || response.value_id == N4S_ID_ALREADY_RUNNING)
+            return 0;
+        /* A run that was interrupted can leave the previous simulation
+        ** going. Clearing it is worth one try before reporting failure. */
+        if (n4s_request("STOP_SIMULATION", NULL) != 0)
+            return -1;
+        /* Let the simulator settle. CYCLE_WAIT costs one round trip and is
+        ** paced by the physics engine, which is exactly the clock we want. */
+        if (n4s_request("CYCLE_WAIT:5", NULL) != 0)
+            return -1;
+    }
+    return -1;
 }
 
 int n4s_stop_simulation(void)

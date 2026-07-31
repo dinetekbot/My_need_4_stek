@@ -119,7 +119,15 @@ int n4s_request(const char *command, n4s_response_t *out);
 int n4s_request_f(const char *command, double argument, n4s_response_t *out);
 
 /* Typed helpers for the commands we actually use. */
-int n4s_start_simulation(void);
+/*
+** Start the race.
+**
+** `out`, if given, receives the API's last response so the caller can report
+** what actually went wrong instead of guessing. Retries a few times: right
+** after a scene is loaded or a previous run was killed, the simulator can
+** refuse for a second or two and then be perfectly happy.
+*/
+int n4s_start_simulation(n4s_response_t *out);
 int n4s_stop_simulation(void);
 int n4s_set_throttle(double power);      /* CAR_FORWARD,   [0;1] */
 int n4s_set_reverse(double power);       /* CAR_BACKWARDS, [0;1] */
