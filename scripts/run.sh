@@ -55,17 +55,31 @@ if [[ "${1:-}" == "--" ]]; then
     shift
 fi
 
+# Each missing piece gets the hint that actually applies to it. A single
+# catch-all message sends you looking for the simulator API when all you
+# needed was to run `make`.
 missing=0
-for binary in "$AI" "$N4S" "$BUFFER"; do
+
+if [[ ! -x "$AI" ]]; then
+    echo "error: the AI binary '$AI' is missing or not executable" >&2
+    echo "       build it with:  make" >&2
+    missing=1
+fi
+
+for binary in "$N4S" "$BUFFER"; do
     if [[ ! -x "$binary" ]]; then
-        echo "error: '$binary' is missing or not executable" >&2
+        echo "error: the simulator API binary '$binary' is missing" >&2
         missing=1
     fi
 done
+
+if [[ ! -x "$N4S" || ! -x "$BUFFER" ]]; then
+    echo "       n4s and n4s_buffer are not part of this repository." >&2
+    echo "       Point API_DIR at the directory holding them, or see" >&2
+    echo "       docs/05-simulator-setup.md." >&2
+fi
+
 if (( missing )); then
-    echo >&2
-    echo "The n4s and n4s_buffer binaries are not part of this repository." >&2
-    echo "See docs/05-simulator-setup.md for where to get them." >&2
     exit 1
 fi
 

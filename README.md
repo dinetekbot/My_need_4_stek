@@ -44,7 +44,10 @@ make                # builds ./ai
 make test           # 948 assertions, no simulator required
 ```
 
-To actually drive, you need the simulator and the API binaries — see
+`make` is not optional before a race: `scripts/run.sh` needs `./ai` to exist,
+and `make fclean` removes it.
+
+To actually drive, you also need the simulator and the API binaries — see
 [docs/05-simulator-setup.md](docs/05-simulator-setup.md). Once they are in
 place:
 
