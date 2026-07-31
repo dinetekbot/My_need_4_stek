@@ -62,19 +62,39 @@ doNotShowCrashRecoveryMessage = true
 
 ## Loading a scene
 
+The normal way, with the window open:
+
+```bash
+./coppeliaSim.sh ~/n4s-scenes/bootstrap_track.ttt
+```
+
+or launch it bare and use `File → Open scene…`. Either works.
+
+Two things will waste your afternoon if you do not know them.
+
 **The command line argument does not survive a path with spaces.**
 `coppeliaSim.sh` does not quote it, so a scene under `~/my projects/` arrives
 as two arguments and is silently ignored — you get an empty scene and the API
 reports `5:KO:SimComponent Loading Failure`. Keep the scenes somewhere without
 spaces.
 
-```bash
-./coppeliaSim.sh ~/n4s-scenes/bootstrap_track.ttt
-```
+**A corrupt scene hangs the whole application.** Handing it `track_1.ttt`
+(see below) does not produce an error dialog. CoppeliaSim opens its remote API
+port, accepts connections, and then blocks forever with its main thread parked
+on a futex, answering every single request with an error. It looks exactly
+like a broken installation, and it is not — it is one bad file. If the
+application appears to start but nothing responds, try a different scene
+before you start reinstalling libraries.
 
-Headless (`-h`) works and is much faster to iterate with, but it ignores the
-scene argument entirely. To drive it headless, load the scene over the remote
-API instead — CoppeliaSim ships the Python bindings under
+### Headless
+
+`-h` runs without a window. It is noticeably quicker — the same track that
+takes 88 control cycles and 55 seconds with the GUI takes 44 cycles and 22
+seconds headless, because nothing is being rendered — which makes it the
+better mode for tuning runs and the only sensible one for CI.
+
+The catch: **headless ignores the scene argument entirely.** Load the scene
+over the remote API instead. CoppeliaSim ships the Python bindings under
 `programming/remoteApiBindings/python/`:
 
 ```python
@@ -108,7 +128,7 @@ Of the eight scenes shipped with the API package, two are unusable:
 | `diamond_bonus` | works — 3 checkpoints |
 | `track_3`, `track_4` | work — 12 checkpoints each |
 | `8_bonus` | works — 11 checkpoints |
-| **`track_1`** | **will not load at all** (`simxLoadScene` fails; 0 objects) |
+| **`track_1`** | **will not load, and hangs the application if passed on the command line** |
 | **`track_2`** | **loads, but its lidar returns nothing but zeros** |
 
 `track_1` is the one the original instructions tell you to open first, which
@@ -129,19 +149,21 @@ The script builds the pipeline and starts driving. `--verbose` prints one
 telemetry line per cycle on stderr:
 
 ```
-[00071] RACING    fwd=  2410 near=  812 gap=yes@-04.7 wheels=-0.121 thr=0.836 rev=0.000 laps=0
+[00031] RACING    fwd=  3007 near=   650 gap=yes@+006.6 wheels=+0.123 thr=0.513 rev=0.000 laps=0
+        >>> TRACK CLEARED (laps=0)
 ```
 
 | Field | Meaning |
 |---|---|
-| `[00071]` | Cycle number |
+| `[00031]` | Cycle number |
 | `RACING` | State machine state |
 | `fwd` | Distance straight ahead, mm |
 | `near` | Closest obstacle anywhere in the cone, mm |
-| `gap=yes@-04.7` | A gap was found, at −4.7° (left of centre) |
+| `gap=yes@+006.6` | A gap was found, at +6.6° (right of centre) |
 | `wheels` | `WHEELS_DIR` sent |
 | `thr` / `rev` | `CAR_FORWARD` / `CAR_BACKWARDS` sent |
 | `laps` | Completed laps |
+| `>>>` | A track progress event: checkpoint, lap, or track cleared |
 
 Ctrl-C stops the car and ends the simulation cleanly.
 
@@ -177,6 +199,7 @@ fight over the same pipe.
 | `22:KO:Scene must contain at least 3 CPs` | Wrong scene, or an edited one that lost its checkpoints |
 | `25:KO:Failed to load Map` | Scene not compatible with this build of CoppeliaSim |
 | Nothing happens, no output, no error | Buffering deadlock — something is writing to stdout through stdio |
+| CoppeliaSim starts but every API call errors | A corrupt scene, or a startup dialog. Try another scene first |
 | Car steers into walls, consistently | Left/right convention — add `--mirror`, see [perception](03-perception.md#which-end-is-the-left) |
 | Car crawls, or does not move at all | A command outside its valid range is being rejected. Run with `N4S_DEBUG=1` to see the API's replies |
 | Car reaches a corner and stops | The safety bubble is erasing the whole cone. Lower `--bubble` |
