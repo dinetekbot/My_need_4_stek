@@ -165,12 +165,13 @@ See [tuning](06-tuning.md) for the method.
 ## The state machine
 
 ```
-   RACING ──── no progress for blind_cycles ────▶ REVERSING
-      ▲          or forward < reverse_dist          │
-      └──── gap found AND forward > reverse_dist×1.8 ┘
-      │                                              │
-      │                        reversing isn't working
-      └── deadend_attempts recoveries ─▶ HALTING ◀───┘
+   RACING ──── no progress for blind_cycles ──────▶ ESCAPE
+      ▲          or forward < reverse_dist            │
+      └── end of a forward phase, gap found,          │
+      │   forward > reverse_dist × 1.8 ───────────────┘
+      │                                               │
+      │                          escape_max_pairs and still stuck
+      └── deadend_attempts recoveries ─▶ HALTING ◀────┘
                                             │
                                             ▼
                                         FINISHED
@@ -209,22 +210,66 @@ car with its wheels turned goes nowhere: cutting the throttle completely near
 a wall prevents the exact manoeuvre needed to get around it. This is the
 difference between taking a tight corner and stopping in front of it.
 
-**`REVERSING`** backs out of trouble. One counter-intuitive line:
+### The escape manoeuvre
 
-```c
-out->wheels = -heading_error(gap);
+**`ESCAPE`** is the interesting one, and it exists because the obvious thing
+does not work.
+
+The obvious thing is to reverse. The previous version did, and steered while
+reversing by aiming at the gap — except that when the car is stuck there
+usually *is* no gap, `heading_error()` returns zero by construction, and the
+steering command is zero. Measured across the real runs: **128 of 294
+reversing cycles applied exactly zero steering.**
+
+Reversing in a straight line is geometrically useless here. It translates the
+car without rotating it, so when it drives forward again it faces the same
+wall from slightly further away. The logs show precisely that: reverse two
+cycles, drive four, reverse two, drive four, indefinitely. The car was not
+escaping, it was pacing.
+
+A car with Ackermann steering cannot turn on the spot. The only way to change
+its heading is a three-point turn:
+
+```
+   phase A: back up, wheels turned one way    -> rear goes that way,
+                                                 nose goes the other
+
+   phase B: pull forward, wheels the other way -> nose continues the same way
+
+   repeat
 ```
 
-The steering is *inverted* while reversing. Backing up with the wheels turned
-left swings the nose to the right, so to end up pointing at an opening on the
-left, the wheels go right. Getting this sign wrong produces a car that
-reverses itself deeper into the corner it was trying to escape — and it looks
-like a perception bug, which is where you will waste the afternoon.
+Both phases rotate the car in the *same* direction, which is why the steering
+is opposite between them. Getting that sign backwards produces a car that
+carefully undoes its own turn, and it looks like a perception bug.
 
-The exit threshold is 1.8× the entry threshold, and it also requires a gap to
-be visible. Without that hysteresis the car shuffles forwards and backwards on
-the boundary indefinitely; without the gap condition it lurches forward into
-the same wall it just backed away from.
+Four rules make it work:
+
+**Commit to a direction.** Chosen once at entry, from the gap if there is one
+and otherwise from the more open side of the cone, then held for the whole
+manoeuvre. Re-deciding every cycle reproduces exactly the dithering the
+manoeuvre exists to cure.
+
+**Full lock, both phases.** The rate limiter is bypassed here. It exists to
+stop the car being unsettled at speed; during the manoeuvre it is moving at
+crawl or reverse power, and spending four of six phase cycles ramping up to
+lock would waste most of the rotation.
+
+**The forward phase still watches the wall.** Crawling forward with the wheels
+on full lock is still crawling forward. Before this check existed, five
+forward cycles took the clearance from 140mm to 110mm — touching the very wall
+the manoeuvre was escaping. It now cuts the phase short and goes back to
+reversing.
+
+**Leave only from a forward phase, with somewhere to go.** Both conditions.
+Leaving mid-reverse abandons the rotation half done; leaving without a gap
+drives straight back into the wall.
+
+The honest result: the manoeuvre fixed the mechanism — **zero straight-line
+reversing cycles across the runs since** — and it makes the car persist
+properly instead of pacing. It did not, on its own, unlock any checkpoint the
+old version could not reach. What it buys is that the car always terminates,
+always tries a real escape, and never sits grinding against a wall.
 
 **`HALTING`** ends the run in a dead end, and it is fiddlier than it sounds.
 The requirement is to stop at least three feet from the wall without touching

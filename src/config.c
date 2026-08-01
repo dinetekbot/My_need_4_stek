@@ -67,8 +67,14 @@ static const option_t OPTIONS[] = {
         "CAR_BACKWARDS power while reversing, [0;1]"},
     {"blind-cycles", OPT_INT, offsetof(config_t, blind_cycles),
         "cycles making no progress before backing up"},
-    {"max-reverse-cycles", OPT_INT, offsetof(config_t, max_reverse_cycles),
-        "cycles to spend reversing before giving up on it"},
+    {"escape-reverse-cycles", OPT_INT,
+        offsetof(config_t, escape_reverse_cycles),
+        "length of the backing-up phase of the three-point turn"},
+    {"escape-forward-cycles", OPT_INT,
+        offsetof(config_t, escape_forward_cycles),
+        "length of the pulling-forward phase of the three-point turn"},
+    {"escape-max-pairs", OPT_INT, offsetof(config_t, escape_max_pairs),
+        "back-and-forward pairs before admitting a dead end"},
     {"deadend-attempts", OPT_INT, offsetof(config_t, deadend_attempts),
         "failed recoveries before declaring a dead end"},
     {"recovery-reset", OPT_INT, offsetof(config_t, recovery_reset_cycles),
@@ -108,7 +114,9 @@ void config_defaults(config_t *cfg)
     cfg->reverse_dist_mm = 400.0;
     cfg->reverse_power = 0.35;
     cfg->blind_cycles = 4;
-    cfg->max_reverse_cycles = 40;
+    cfg->escape_reverse_cycles = 6;
+    cfg->escape_forward_cycles = 6;
+    cfg->escape_max_pairs = 4;
     cfg->deadend_attempts = 6;
     cfg->recovery_reset_cycles = 20;
     cfg->deadend_clearance_mm = 1000.0;

@@ -41,7 +41,7 @@ are the entire output. Everything between the two is in this repository.
 git clone <this repository>
 cd lidar-racer
 make                # builds ./ai
-make test           # 948 assertions, no simulator required
+make test           # 1015 assertions, no simulator required
 ```
 
 `make` is not optional before a race: `scripts/run.sh` needs `./ai` to exist,
@@ -87,13 +87,22 @@ small-scale autonomous racing. Each cycle:
 5. **Set the power.** A distance-to-throttle curve, reduced in proportion to
    how hard the car is turning.
 
-A small state machine sits on top: `RACING` → `REVERSING` whenever the car
-stops making progress, for any reason; → `HALTING` once backing up and
-retrying has failed enough times to count as a genuine dead end. Halting backs
-off until it has a metre of clearance before ending the simulation — stopping
-with the bumper against the wall is a failed run even though the car did
-stop — and settles for the clearance it can actually reach, since reversing is
-blind and a corner can wedge the car short of the ideal.
+A small state machine sits on top: `RACING` → `ESCAPE` whenever the car stops
+making progress, for any reason; → `HALTING` once escaping has failed enough
+times to count as a genuine dead end.
+
+`ESCAPE` is a **three-point turn**, not a reverse, and the distinction is the
+whole point. Backing up in a straight line translates the car without rotating
+it, so it drives forward into the same wall again — measured across the real
+runs, 128 of 294 reversing cycles applied exactly zero steering and did
+precisely that. A car with Ackermann steering cannot turn on the spot, so the
+manoeuvre alternates: back up with the wheels one way, pull forward with them
+the other. Both phases rotate it the same direction.
+
+Halting backs off until it has a metre of clearance before ending the
+simulation — stopping with the bumper against the wall is a failed run even
+though the car did stop — but it is bounded. Reversing is blind, and a car
+that keeps backing out of a dead end is just driving the track backwards.
 
 ---
 
@@ -169,8 +178,8 @@ settings, at roughly two control cycles per second:
 
 | Scene | Result |
 |---|---|
-| `bootstrap_track` | **Track cleared**, 44 cycles, 22 s, zero recoveries |
-| `criss_cross` | 2 of 3 checkpoints, then a clean dead-end stop |
+| `bootstrap_track` | **Track cleared**, 36–43 cycles, 3 runs of 3, zero recoveries |
+| `criss_cross` | 2 of 3 checkpoints, then a clean bounded stop |
 | `track_3` | drives 1205 cycles with 3 recoveries and no dead ends, reaching 2 of 12 checkpoints — safe but slow |
 | `track_4`, `diamond_bonus` | drive continuously for 380+ cycles, 0–7 recoveries, not run long enough to clear |
 | `track_1` | the scene itself will not load |
@@ -204,7 +213,7 @@ response
 perception
 control
 
-948 checks, 0 failed
+1015 checks, 0 failed
 OK
 ```
 

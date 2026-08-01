@@ -19,7 +19,7 @@
 /* What the car is currently trying to do. */
 typedef enum {
     DRIVE_RACING = 0,  /* normal operation: follow the gap                 */
-    DRIVE_REVERSING,   /* too close to a wall, back up and re-aim          */
+    DRIVE_ESCAPE,      /* stuck: three-point turn to change heading        */
     DRIVE_HALTING,     /* dead end: brake, then end the simulation         */
     DRIVE_FINISHED     /* track cleared or lap limit reached               */
 } drive_state_t;
@@ -38,10 +38,15 @@ typedef struct {
     double        last_error;     /* previous heading error, for the D term  */
     int           stuck_cycles;   /* consecutive cycles making no progress   */
     int           halt_cycles;    /* consecutive cycles spent stationary     */
-    int           reverse_cycles; /* cycles spent in the current reverse     */
+    /* ---- escape manoeuvre ---------------------------------------------- */
+    double        escape_dir;     /* +1 aim the nose right, -1 left; fixed   */
+    int           escape_phase;   /* 0 = backing up, 1 = pulling forward     */
+    int           escape_cycles;  /* cycles spent in the current phase       */
+    int           escape_pairs;   /* completed back-and-forward pairs        */
     int           recoveries;     /* reverses since the last clean stretch   */
     double        halt_best_mm;   /* best clearance reached while halting    */
     int           halt_stalls;    /* halting cycles that gained no clearance */
+    int           halt_total;     /* total cycles spent halting              */
     int           good_cycles;    /* consecutive untroubled racing cycles    */
     long          cycles;         /* total cycles executed                   */
     long          faulty_scans;   /* lidar reads with nothing usable in them */
@@ -80,11 +85,10 @@ double throttle_command(const scan_t *scan, double wheels, const config_t *cfg);
 /*
 ** Run one decision cycle: update the state machine and fill `out`.
 **
-** On the cycle where the state changes, `out` is left at zero -- the car
-** coasts for one cycle rather than acting on a decision made by the state it
-** is leaving. Race-ending events (track cleared, lap limit) are noticed by
-** the caller, which owns the protocol; the controller only handles the
-** situations it can see in the scan.
+** A transition does not cost an idle cycle: entering the escape manoeuvre
+** issues its first command straight away. Race-ending events (track cleared,
+** lap limit) are noticed by the caller, which owns the protocol; the
+** controller only handles the situations it can see in the scan.
 */
 void controller_step(controller_t *ctl, const scan_t *scan, const gap_t *gap,
     const config_t *cfg, command_t *out);

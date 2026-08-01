@@ -79,7 +79,7 @@ off, the car steers into the first corner within three cycles:
 [00001] RACING  fwd=3010 near= 725 gap=yes@+000.9 wheels=+0.068 thr=0.529
 [00002] RACING  fwd=3007 near= 688 gap=yes@+006.6 wheels=+0.318 thr=0.454
 [00003] RACING  fwd= 500 near= 283 gap=yes@+027.2 wheels=+0.568 thr=0.100
-[00004] REVERSING ...
+[00004] ESCAPE ... (the recovery manoeuvre, cycle after cycle)
 ```
 
 With it on, from the same starting position, it drives:
@@ -103,29 +103,34 @@ scan_build(&scan, raw, &cfg);
 Three things happen, in order.
 
 **Sanitising.** Any reading that is negative, zero, or not a finite number is a
-sensor fault. It is replaced with the floor distance — effectively "obstacle
-right here".
+sensor fault. What you put in its place is the most consequential decision in
+the perception code, because the two options are not symmetric.
 
-This is the most important line in the perception code, and it looks like
-nothing:
-
-```c
-if (!isfinite(ranges[i]) || ranges[i] <= 0.0)
-    ranges[i] = cfg->lidar_floor_mm;
-```
-
-The alternative — substituting the maximum range, treating a faulty reading as
-open space — is *also* one line, also looks reasonable, and puts the car into
-a wall the first time the sensor hiccups. The simulator returns all-zero scans
-before the scene is running. Optimistic substitution means the car launches
-itself at full throttle at something it cannot see.
+Substituting the *maximum* range — treating a dead ray as open space — is one
+line, looks perfectly reasonable, and puts the car into a wall the first time
+the sensor hiccups. The simulator returns all-zero scans before the scene is
+running; an optimistic substitution launches the car at full throttle at
+something it cannot see.
 
 **Ambiguity resolves towards braking.** Always.
 
+But "obstacle right here" is not right either, and this took a real run to
+notice. An *isolated* dead ray, with healthy neighbours on both sides, is a
+dropout — not a wall. Substituting the floor distance turns it into a phantom
+obstacle one millimetre away, which inflates the safety bubble to its maximum
+for that cycle and can erase an opening the car could have driven through.
+Measured on one track: 9 of 254 cycles.
+
+So the rule has two halves:
+
+- an isolated dropout is **interpolated** from its neighbours
+- a *run* of dead rays, with nothing healthy to interpolate from, collapses to
+  the floor — the pessimistic answer
+
 A scan where *every* ray is faulty is not a car in a sealed box, it is a dead
-sensor. [`main.c`](../src/main.c) detects that case separately and skips the
-cycle rather than braking, because braking on it every cycle would also be
-wrong.
+sensor. [`main.c`](../src/main.c) detects that case separately, skips the
+cycle, and says so on stderr — braking on it every cycle in silence is
+indistinguishable from a hang.
 
 **Clamping** to `[floor, 3010]` — nothing outside the sensor's physical range
 reaches the control code.

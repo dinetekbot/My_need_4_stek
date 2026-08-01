@@ -94,7 +94,26 @@ seconds headless, because nothing is being rendered — which makes it the
 better mode for tuning runs and the only sensible one for CI.
 
 The catch: **headless ignores the scene argument entirely.** Load the scene
-over the remote API instead. CoppeliaSim ships the Python bindings under
+over the remote API instead. [`scripts/load_scene.py`](../scripts/load_scene.py)
+does that, selects the ODE engine, and checks the scene actually contains the
+objects the API drives:
+
+```bash
+export COPPELIASIM_ROOT=~/opt/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04
+scripts/load_scene.py ~/n4s-scenes/bootstrap_track.ttt
+```
+```
+scene       bootstrap_track.ttt
+objects     258
+checkpoints 3
+engine      ode
+
+Ready. Leave the simulation stopped; the AI starts it.
+```
+
+It refuses a path containing a space and reports a scene that will not load,
+rather than leaving you to work out why the API says `SimComponent Loading
+Failure`. Under the hood it is just the bindings CoppeliaSim ships in
 `programming/remoteApiBindings/python/`:
 
 ```python

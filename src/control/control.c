@@ -39,6 +39,19 @@ static const double HALT_CLEARANCE_MARGIN = 1.25;
 static const double HALT_PROGRESS_MM = 20.0;
 /* Consecutive cycles of getting nowhere before we settle for what we have. */
 static const int HALT_STALL_CYCLES = 8;
+/*
+** Absolute ceiling on the whole halting phase.
+**
+** Reversing is blind, and a car that backs out of a dead end and keeps going
+** is simply driving the track backwards: observed on a real track, the
+** forward clearance rose to 1350mm, then fell back to 500mm as the car
+** reversed around a bend, and the manoeuvre never ended -- 297 cycles of it.
+**
+** Coming to rest short of the required clearance is a worse result. Never
+** coming to rest at all is not a result. So this is a ceiling, not a target,
+** and reaching it is reported rather than hidden.
+*/
+static const int HALT_MAX_CYCLES = 60;
 
 void controller_init(controller_t *ctl)
 {
@@ -52,7 +65,7 @@ const char *drive_state_name(drive_state_t state)
 {
     switch (state) {
     case DRIVE_RACING:    return "RACING";
-    case DRIVE_REVERSING: return "REVERSING";
+    case DRIVE_ESCAPE:    return "ESCAPE";
     case DRIVE_HALTING:   return "HALTING";
     case DRIVE_FINISHED:  return "FINISHED";
     default:              return "UNKNOWN";
@@ -126,6 +139,12 @@ double throttle_command(const scan_t *scan, double wheels, const config_t *cfg)
     return clampd(power, 0.0, cfg->throttle_max);
 }
 
+/* Both defined below, next to the manoeuvre they belong to. */
+static void begin_escape(controller_t *ctl, const scan_t *scan,
+    const gap_t *gap);
+static void step_escape(controller_t *ctl, const scan_t *scan,
+    const gap_t *gap, const config_t *cfg, command_t *out);
+
 /*
 ** Racing.
 **
@@ -189,37 +208,127 @@ static void step_racing(controller_t *ctl, const scan_t *scan,
         ctl->halt_cycles = 0;
         return;
     }
-    ctl->state = DRIVE_REVERSING;
+    begin_escape(ctl, scan, gap);
     ctl->recoveries++;
-    ctl->reverse_cycles = 0;
+    /* Start backing up in this very cycle rather than emitting an idle one.
+    ** A transition cycle that commands nothing is a small thing, but it is
+    ** the same "never idle" invariant that the rest of this state machine is
+    ** built on, and it costs one call to keep it true everywhere. */
+    step_escape(ctl, scan, gap, cfg, out);
 }
 
 /*
-** Reversing: steer *against* the gap. Backing up with the wheels turned left
-** swings the nose right, so to end up pointing at an opening on the left the
-** wheels go right while the car is going backwards.
+** Which way should the nose end up pointing?
+**
+** Decided once, when the manoeuvre starts, and then held. Re-deciding every
+** cycle reproduces exactly the dithering the manoeuvre exists to cure: the
+** car would reverse a little one way, change its mind, reverse back, and
+** finish where it started.
+**
+** Prefer the gap if there is one; otherwise the side of the cone with more
+** room. Never zero -- "straight" is the one answer that cannot help.
 */
-static void step_reversing(controller_t *ctl, const scan_t *scan,
+static double choose_escape_direction(const scan_t *scan, const gap_t *gap)
+{
+    double hint = gap->found ? heading_error(gap) : centring_error(scan);
+
+    if (hint > 0.0)
+        return 1.0;
+    if (hint < 0.0)
+        return -1.0;
+    /* Perfectly symmetric. Any committed choice beats no choice. */
+    return 1.0;
+}
+
+static void begin_escape(controller_t *ctl, const scan_t *scan,
+    const gap_t *gap)
+{
+    ctl->state = DRIVE_ESCAPE;
+    ctl->escape_dir = choose_escape_direction(scan, gap);
+    ctl->escape_phase = 0;
+    ctl->escape_cycles = 0;
+    ctl->escape_pairs = 0;
+}
+
+/*
+** The escape manoeuvre: a three-point turn.
+**
+** The geometry is the whole point, and it is worth stating precisely because
+** the sign is easy to get backwards. Backing up with the wheels turned to the
+** right swings the *rear* right and therefore the *nose* left. Driving
+** forward with the wheels turned left also swings the nose left. So the two
+** phases use opposite steering to rotate the car the same way, and each pair
+** of phases buys a real change of heading.
+**
+** Reversing in a straight line, which is what the previous version did
+** whenever no gap was visible, buys none: it translates the car and leaves it
+** facing the same wall.
+**
+** Full lock is applied directly rather than through the rate limiter. The
+** limiter exists to stop the car being unsettled at speed; here it is moving
+** at crawl or reverse power, and spending four of the six phase cycles
+** ramping up to lock would waste most of the rotation.
+*/
+static void step_escape(controller_t *ctl, const scan_t *scan,
     const gap_t *gap, const config_t *cfg, command_t *out)
 {
-    ctl->reverse_cycles++;
-    /* Out of trouble: room ahead *and* somewhere to aim. Requiring both
-    ** stops the car from lurching forward into the same wall again. */
-    if (gap->found
+    bool backing = (ctl->escape_phase == 0);
+    int phase_length = backing ? cfg->escape_reverse_cycles
+        : cfg->escape_forward_cycles;
+
+    /*
+    ** Only leave at the end of a forward phase, and only with somewhere to go.
+    **
+    ** Both conditions matter. Leaving mid-reverse would abandon the rotation
+    ** half done; leaving without a gap would drive straight back into the
+    ** wall we are escaping, which is the ping-pong this replaces.
+    */
+    if (!backing && gap->found
         && scan->forward_mm > cfg->reverse_dist_mm * REVERSE_EXIT_FACTOR) {
         ctl->state = DRIVE_RACING;
         ctl->stuck_cycles = 0;
+        ctl->last_wheels = out->wheels;
         return;
     }
-    /* Backing up is not helping either. */
-    if (ctl->reverse_cycles >= cfg->max_reverse_cycles) {
+    if (ctl->escape_pairs >= cfg->escape_max_pairs) {
         ctl->state = DRIVE_HALTING;
         ctl->halt_cycles = 0;
         return;
     }
-    out->wheels = -heading_error(gap);
-    out->reverse = cfg->reverse_power;
+    /*
+    ** The forward phase still has to watch where it is going.
+    **
+    ** Without this it crawls into the wall it is turning away from: measured
+    ** on a real track, five forward cycles took the clearance from 140mm to
+    ** 110mm, which is touching. Cut the phase short and go back to reversing
+    ** instead -- the turn continues either way, and the point of the
+    ** manoeuvre is to get out without hitting anything.
+    */
+    if (!backing && scan->forward_mm < cfg->reverse_dist_mm) {
+        ctl->escape_phase = 0;
+        ctl->escape_cycles = 0;
+        ctl->escape_pairs++;
+        out->wheels = -ctl->escape_dir;
+        out->reverse = cfg->reverse_power;
+        ctl->last_wheels = out->wheels;
+        return;
+    }
+    if (backing) {
+        out->wheels = -ctl->escape_dir;
+        out->reverse = cfg->reverse_power;
+    } else {
+        out->wheels = ctl->escape_dir;
+        out->throttle = cfg->crawl_power;
+    }
     ctl->last_wheels = out->wheels;
+    ctl->escape_cycles++;
+    if (ctl->escape_cycles >= phase_length) {
+        ctl->escape_cycles = 0;
+        ctl->escape_phase = backing ? 1 : 0;
+        /* A pair is complete once the forward phase ends. */
+        if (!backing)
+            ctl->escape_pairs++;
+    }
 }
 
 /*
@@ -233,6 +342,12 @@ static void step_halting(controller_t *ctl, const scan_t *scan,
     double target = cfg->deadend_clearance_mm * HALT_CLEARANCE_MARGIN;
     bool legal = scan->forward_mm >= cfg->deadend_clearance_mm;
 
+    ctl->halt_total++;
+    /* Out of patience. Stop where we are rather than reverse forever. */
+    if (ctl->halt_total >= HALT_MAX_CYCLES) {
+        ctl->state = DRIVE_FINISHED;
+        return;
+    }
     /* Track whether backing up is still buying clearance. */
     if (scan->forward_mm > ctl->halt_best_mm + HALT_PROGRESS_MM) {
         ctl->halt_best_mm = scan->forward_mm;
@@ -240,6 +355,13 @@ static void step_halting(controller_t *ctl, const scan_t *scan,
     } else {
         ctl->halt_stalls++;
     }
+    /*
+    ** Once enough room has been reached at any point, stop reversing for
+    ** good. Continuing past it is how the car ends up backing around a bend
+    ** and losing the clearance it had already earned.
+    */
+    if (ctl->halt_best_mm >= target && ctl->halt_cycles == 0)
+        ctl->halt_cycles = 1;
     /*
     ** Still backing up towards the margin -- unless reversing has stopped
     ** achieving anything.
@@ -280,8 +402,8 @@ void controller_step(controller_t *ctl, const scan_t *scan, const gap_t *gap,
     case DRIVE_RACING:
         step_racing(ctl, scan, gap, cfg, out);
         break;
-    case DRIVE_REVERSING:
-        step_reversing(ctl, scan, gap, cfg, out);
+    case DRIVE_ESCAPE:
+        step_escape(ctl, scan, gap, cfg, out);
         break;
     case DRIVE_HALTING:
         step_halting(ctl, scan, cfg, out);

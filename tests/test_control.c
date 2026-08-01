@@ -4,6 +4,7 @@
 ** test_control.c -- steering law, throttle law, driving state machine.
 */
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -278,7 +279,7 @@ static void test_stuck_without_a_gap_reverses(void)
 
     for (int i = 0; i < cfg.blind_cycles; i++)
         controller_step(&ctl, &scan, &gap, &cfg, &cmd);
-    CHECK(ctl.state == DRIVE_REVERSING);
+    CHECK(ctl.state == DRIVE_ESCAPE);
 }
 
 /* One gapless cycle in the middle of a run is noise, not a dead end. */
@@ -321,7 +322,8 @@ static void test_repeated_failed_recoveries_end_the_race(void)
     memset(&gap, 0, sizeof(gap));
     gap.found = false;
 
-    for (int i = 0; i < cfg.deadend_attempts * cfg.max_reverse_cycles * 2; i++) {
+    for (int i = 0; i < cfg.escape_max_pairs * (cfg.escape_reverse_cycles
+        + cfg.escape_forward_cycles) * 4; i++) {
         controller_step(&ctl, &scan, &gap, &cfg, &cmd);
         if (ctl.state == DRIVE_HALTING || ctl.state == DRIVE_FINISHED)
             break;
@@ -353,7 +355,118 @@ static void test_clean_racing_clears_the_recovery_count(void)
     CHECK(ctl.state == DRIVE_RACING);
 }
 
-static void test_reversing_when_too_close(void)
+static void test_escape_when_too_close(void)
+{
+    config_t cfg;
+    controller_t ctl;
+    scan_t scan;
+    gap_t gap;
+    command_t cmd;
+    int reverse_cycles = 0;
+
+    plain_config(&cfg);
+    controller_init(&ctl);
+    memset(&gap, 0, sizeof(gap));
+    gap.found = true;
+
+    build_scan(&scan, &cfg, cfg.reverse_dist_mm - 10.0);
+    controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+    CHECK(ctl.state == DRIVE_ESCAPE);
+    /* The manoeuvre starts in the very cycle it is entered -- no idle cycle
+    ** while the state machine changes its mind. */
+    CHECK_NEAR(cmd.throttle, 0.0, 1e-9);
+    CHECK(cmd.reverse > 0.0);
+    /* And it steers while backing up. Backing straight is the one thing that
+    ** cannot help: it moves the car without rotating it. */
+    CHECK(fabs(cmd.wheels) > 0.5);
+    reverse_cycles++;
+
+    /* Room alone does not end the manoeuvre: it finishes backing up first,
+    ** because abandoning the turn half way leaves the car pointing exactly
+    ** where it was stuck. */
+    build_scan(&scan, &cfg, cfg.reverse_dist_mm * 3.0);
+    for (int i = 0; i < 50 && ctl.state == DRIVE_ESCAPE; i++) {
+        controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+        if (cmd.reverse > 0.0)
+            reverse_cycles++;
+    }
+    CHECK(ctl.state == DRIVE_RACING);
+    CHECK(reverse_cycles >= cfg.escape_reverse_cycles);
+}
+
+/*
+** The escape manoeuvre must actually rotate the car.
+**
+** Backing straight up translates it and leaves the heading untouched, which
+** is what the previous version did whenever no gap was visible: 128 of 294
+** reversing cycles across the real runs applied zero steering, and the car
+** drove back into the same wall every time.
+**
+** A car with Ackermann steering cannot turn on the spot. Backing up with the
+** wheels one way and pulling forward with them the other rotates it the same
+** direction twice -- a three-point turn. So the two phases must use opposite,
+** committed, full lock.
+*/
+static void test_escape_alternates_and_rotates(void)
+{
+    config_t cfg;
+    controller_t ctl;
+    scan_t scan;
+    gap_t gap;
+    command_t cmd;
+    double back_wheels = 0.0;
+    double fwd_wheels = 0.0;
+    int back_seen = 0;
+    int fwd_seen = 0;
+
+    plain_config(&cfg);
+    controller_init(&ctl);
+    /* Stuck for lack of a gap, not for lack of room: the forward phase needs
+    ** space ahead, or it correctly refuses to run at all. */
+    build_scan(&scan, &cfg, cfg.reverse_dist_mm * 4.0);
+    memset(&gap, 0, sizeof(gap));
+    gap.found = false;
+
+    for (int i = 0; i < 10 && ctl.state != DRIVE_ESCAPE; i++)
+        controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+    CHECK(ctl.state == DRIVE_ESCAPE);
+
+    for (int i = 0; i < 24; i++) {
+        if (ctl.state != DRIVE_ESCAPE)
+            break;
+        controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+        if (ctl.state != DRIVE_ESCAPE)
+            break;
+        if (cmd.reverse > 0.0) {
+            if (back_seen++ == 0)
+                back_wheels = cmd.wheels;
+            /* Committed: the direction is chosen once at entry, never
+            ** re-decided cycle by cycle. Re-deciding is the dithering the
+            ** manoeuvre exists to cure. */
+            CHECK_NEAR(cmd.wheels, back_wheels, 1e-9);
+        } else if (cmd.throttle > 0.0) {
+            if (fwd_seen++ == 0)
+                fwd_wheels = cmd.wheels;
+            CHECK_NEAR(cmd.wheels, fwd_wheels, 1e-9);
+        }
+    }
+    /* Both phases actually happened. */
+    CHECK(back_seen >= cfg.escape_reverse_cycles);
+    CHECK(fwd_seen >= 1);
+    /* Opposite lock, both at full deflection: that is what rotates the car. */
+    CHECK_NEAR(fwd_wheels, -back_wheels, 1e-9);
+    CHECK(fabs(back_wheels) > 0.5);
+}
+
+/*
+** The forward half of the manoeuvre must not drive into the wall.
+**
+** Crawling forward with the wheels on full lock is still crawling forward.
+** Measured on a real track before this check existed: five forward cycles
+** took the clearance from 140mm to 110mm, which is touching the wall the
+** manoeuvre was supposed to escape.
+*/
+static void test_escape_forward_phase_respects_the_wall(void)
 {
     config_t cfg;
     controller_t ctl;
@@ -364,25 +477,72 @@ static void test_reversing_when_too_close(void)
     plain_config(&cfg);
     controller_init(&ctl);
     memset(&gap, 0, sizeof(gap));
-    gap.found = true;
+    gap.found = false;
+    /* Enter the manoeuvre, then let it reach the forward phase with room. */
+    build_scan(&scan, &cfg, cfg.reverse_dist_mm / 2.0);
+    controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+    build_scan(&scan, &cfg, cfg.reverse_dist_mm * 4.0);
+    for (int i = 0; i < cfg.escape_reverse_cycles + 1; i++)
+        controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+    CHECK(cmd.throttle > 0.0);          /* pulling forward */
 
-    build_scan(&scan, &cfg, cfg.reverse_dist_mm - 10.0);
-    controller_step(&ctl, &scan, &gap, &cfg, &cmd);
-    CHECK(ctl.state == DRIVE_REVERSING);
+    /* Now a wall appears close ahead. It must stop pulling forward. */
+    build_scan(&scan, &cfg, cfg.reverse_dist_mm / 2.0);
+    for (int i = 0; i < 6 && ctl.state == DRIVE_ESCAPE; i++) {
+        controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+        CHECK_NEAR(cmd.throttle, 0.0, 1e-9);
+    }
+}
 
-    /* While reversing: backwards power, no forward power. */
-    controller_step(&ctl, &scan, &gap, &cfg, &cmd);
-    CHECK_NEAR(cmd.throttle, 0.0, 1e-9);
-    CHECK_NEAR(cmd.reverse, cfg.reverse_power, 1e-9);
+/*
+** Halting must always terminate.
+**
+** Reversing is blind. A car that backs out of a dead end and keeps going is
+** driving the track backwards, and the forward clearance it is waiting for
+** may never arrive: observed on a real track, it rose to 1350mm, fell back to
+** 500mm around a bend, and the manoeuvre ran for 297 cycles without ending.
+** Stopping short of the ideal clearance is a poor result; never stopping is
+** not a result at all.
+*/
+static void test_halting_always_terminates(void)
+{
+    config_t cfg;
+    controller_t ctl;
+    scan_t scan;
+    gap_t gap;
+    command_t cmd;
 
-    /* Backing out until there is clearly room again, with hysteresis so the
-    ** car does not shuffle back and forth on the threshold. */
-    build_scan(&scan, &cfg, cfg.reverse_dist_mm * 1.2);
-    controller_step(&ctl, &scan, &gap, &cfg, &cmd);
-    CHECK(ctl.state == DRIVE_REVERSING);
-    build_scan(&scan, &cfg, cfg.reverse_dist_mm * 3.0);
-    controller_step(&ctl, &scan, &gap, &cfg, &cmd);
-    CHECK(ctl.state == DRIVE_RACING);
+    plain_config(&cfg);
+    controller_init(&ctl);
+    ctl.state = DRIVE_HALTING;
+    memset(&gap, 0, sizeof(gap));
+    /* Clearance the car can never reach, and which never improves. */
+    build_scan(&scan, &cfg, cfg.deadend_clearance_mm / 4.0);
+    for (int i = 0; i < 500 && ctl.state == DRIVE_HALTING; i++)
+        controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+    CHECK(ctl.state == DRIVE_FINISHED);
+}
+
+/* Never idle, in every phase of the manoeuvre. */
+static void test_escape_is_never_idle(void)
+{
+    config_t cfg;
+    controller_t ctl;
+    scan_t scan;
+    gap_t gap;
+    command_t cmd;
+
+    plain_config(&cfg);
+    controller_init(&ctl);
+    build_scan(&scan, &cfg, cfg.reverse_dist_mm / 2.0);
+    memset(&gap, 0, sizeof(gap));
+    gap.found = false;
+    for (int i = 0; i < 40; i++) {
+        controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+        if (ctl.state != DRIVE_ESCAPE)
+            continue;
+        CHECK(cmd.throttle > 0.0 || cmd.reverse > 0.0);
+    }
 }
 
 /*
@@ -473,7 +633,11 @@ void test_control(void)
     test_single_blind_cycle_is_ignored();
     test_repeated_failed_recoveries_end_the_race();
     test_clean_racing_clears_the_recovery_count();
-    test_reversing_when_too_close();
+    test_escape_when_too_close();
+    test_escape_alternates_and_rotates();
+    test_escape_is_never_idle();
+    test_escape_forward_phase_respects_the_wall();
     test_halting_backs_off_to_legal_clearance();
     test_halting_tolerates_coasting();
+    test_halting_always_terminates();
 }

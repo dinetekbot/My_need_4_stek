@@ -155,8 +155,10 @@ must start before reversing does, so keep `brake-dist > reverse-dist`.
 |---|---|---|
 | `--reverse-dist` | 400 | Below this, back up, mm. |
 | `--reverse-power` | 0.35 | Power used while reversing. |
-| `--blind-cycles` | 4 | Cycles making no progress before backing up. |
-| `--max-reverse-cycles` | 40 | Cycles spent reversing before giving up on it. |
+| `--blind-cycles` | 4 | Cycles making no progress before starting the escape manoeuvre. |
+| `--escape-reverse-cycles` | 6 | Length of the backing-up phase of the three-point turn. |
+| `--escape-forward-cycles` | 6 | Length of the pulling-forward phase. |
+| `--escape-max-pairs` | 4 | Back-and-forward pairs before admitting a dead end. |
 | `--deadend-attempts` | 6 | Failed recoveries before declaring a dead end. |
 | `--recovery-reset` | 20 | Clean racing cycles that clear the recovery counter. |
 | `--deadend-clearance` | 1000 | Clearance required before ending the simulation, mm. |
@@ -167,6 +169,11 @@ must start before reversing does, so keep `brake-dist > reverse-dist`.
 wall" timer — creeping forward while the gap search returns nothing is driving
 blind, and the wall does not move away while you wait. Four cycles is enough
 to reject noise.
+
+**The escape phases scale with the track, like the distances.** Longer phases
+rotate the car further per pair, which helps in an open dead end and hurts in
+a corridor barely longer than the car -- there, a long reverse simply runs
+into whatever is behind. Shorten both phases on tight tracks.
 
 **`--deadend-attempts` too low** and the car gives up in corners it could have
 taken. **Too high** and it spends a long time nudging a genuine dead end
@@ -201,7 +208,7 @@ To capture a run for later study:
 
 ```bash
 scripts/run.sh -- --verbose 2> run.log
-grep REVERSING run.log | head          # where did it get stuck?
+grep ESCAPE run.log | head             # where did it get stuck?
 awk '{print $6}' run.log | sort | uniq -c   # how often was there no gap?
 ```
 

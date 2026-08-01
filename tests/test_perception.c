@@ -61,14 +61,44 @@ static void test_sanitising(void)
 
     plain_config(&cfg);
     fill(raw, 1500.0);
-    raw[4] = -12.0;
-    raw[5] = 0.0;
     raw[6] = 99999.0;
     scan_build(&scan, raw, &cfg);
-    CHECK_NEAR(scan.ranges[4], cfg.lidar_floor_mm, 1e-9);
-    CHECK_NEAR(scan.ranges[5], cfg.lidar_floor_mm, 1e-9);
     CHECK_NEAR(scan.ranges[6], N4S_LIDAR_MAX_MM, 1e-9);
     CHECK_NEAR(scan.ranges[0], 1500.0, 1e-9);
+
+    /* A run of dead rays has nothing to interpolate from, so it collapses to
+    ** the floor: the pessimistic answer, which makes the car brake. */
+    fill(raw, 1500.0);
+    raw[10] = -12.0;
+    raw[11] = 0.0;
+    raw[12] = 0.0;
+    scan_build(&scan, raw, &cfg);
+    CHECK_NEAR(scan.ranges[11], cfg.lidar_floor_mm, 1e-9);
+}
+
+/*
+** An isolated dropout is not a wall.
+**
+** Substituting "obstacle one millimetre away" for a single dead ray whose
+** neighbours are healthy inflates the safety bubble to its maximum for that
+** cycle and can erase an opening the car could have used. Measured on a real
+** track: 9 of 254 cycles. Neighbouring rays are the better estimate.
+*/
+static void test_isolated_dropout_is_interpolated(void)
+{
+    config_t cfg;
+    scan_t scan;
+    double raw[N4S_LIDAR_RAYS];
+
+    plain_config(&cfg);
+    fill(raw, 1500.0);
+    raw[8] = 1000.0;
+    raw[9] = 0.0;      /* dropout between two healthy rays */
+    raw[10] = 1400.0;
+    scan_build(&scan, raw, &cfg);
+    CHECK_NEAR(scan.ranges[9], 1200.0, 1e-9);
+    /* And it no longer looks like the closest obstacle in the scan. */
+    CHECK(scan.closest_mm > cfg.lidar_floor_mm);
 }
 
 static void test_mirroring(void)
@@ -242,6 +272,7 @@ void test_perception(void)
     printf("perception\n");
     test_ray_angles();
     test_sanitising();
+    test_isolated_dropout_is_interpolated();
     test_mirroring();
     test_forward_uses_minimum();
     test_side_summaries();

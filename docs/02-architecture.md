@@ -92,22 +92,24 @@ you want to know *why it is like that*, read the source.
        ┌──────────────────────────────────────────┐
        │                                          ▼
   ┌────┴─────┐                            ┌───────────────┐
-  │  RACING  │                            │   REVERSING   │
+  │  RACING  │                            │    ESCAPE     │
   └────┬─────┘◄───────────────────────────┴───────┬───────┘
-       │   gap found AND forward > reverse_dist×1.8│
-       │                                          │
-       │ deadend_attempts failed recoveries       │ max_reverse_cycles
-       │                                          │ of getting nowhere
+       │  end of a forward phase, gap found,      │
+       │  and forward > reverse_dist × 1.8        │ escape_max_pairs
+       │                                          │ without getting out
        ▼                                          │
   ┌───────────┐◄──────────────────────────────────┘
   │  HALTING  │  back off to a legal clearance, then settle
-  └────┬──────┘
+  └────┬──────┘  (bounded: it always terminates)
        │
        ▼
   ┌────────────┐
   │  FINISHED  │  ← also entered directly on "Track Cleared" or lap limit
   └────────────┘
 ```
+
+`ESCAPE` is a three-point turn, not a reverse. See
+[control](04-control.md#the-escape-manoeuvre) for why the difference matters.
 
 The governing invariant is that **the car is never idle**: every racing cycle
 either commands forward motion or hands over to a recovery. Progress is
@@ -117,22 +119,26 @@ threshold, which is what closes the band between "too close to accelerate" and
 
 Three details that are easy to get wrong:
 
-**Hysteresis on the reverse exit.** Leaving `REVERSING` at exactly the
-distance that entered it makes the car shuffle forwards and backwards on the
-threshold forever. The exit needs 1.8× the entry distance *and* a visible gap,
-or the car lurches straight back into the wall it just escaped.
+**Hysteresis on the escape exit.** Leaving at exactly the distance that
+triggered the manoeuvre makes the car shuffle back and forth on the threshold
+forever. The exit needs 1.8× that distance, a visible gap, *and* a completed
+backing-up phase — abandoning the turn half way leaves the car pointing
+exactly where it was stuck.
 
 **Recoveries, not cycles.** A dead end is a number of failed recover-and-retry
 attempts, not a number of bad scans; and a clean stretch of racing clears the
 count, so a track full of tight corners cannot accumulate its way into a false
 dead end.
 
-**Clearance before halting.** The rules require the car to come to rest at
-least three feet from the wall. `HALTING` backs up to a 25% margin — without
-it the car coasts back over the line and never settles — but also gives up on
-the margin once reversing stops gaining ground, because there is no rear
-sensor and a corner can wedge the car short of it indefinitely. Insisting on
-the ideal outcome there means never terminating at all.
+**Clearance before halting, but bounded.** The rules require the car to come
+to rest at least three feet from the wall. `HALTING` backs up to a 25% margin
+— without it the car coasts back over the line and never settles — but it also
+gives up: once reversing stops gaining ground, and unconditionally after sixty
+cycles. Reversing is blind, and a car that backs out of a dead end and keeps
+going is just driving the track backwards; measured on a real track, the
+clearance rose to 1350mm, fell back to 500mm around a bend, and the phase ran
+297 cycles without ending. Stopping short of the ideal clearance is a poor
+result. Never stopping is not a result.
 
 ## Failure handling
 

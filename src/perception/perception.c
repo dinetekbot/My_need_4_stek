@@ -54,20 +54,48 @@ static void normalise_order(double *dst, const double *raw, bool inverted)
         dst[i] = inverted ? raw[N4S_LIDAR_RAYS - 1 - i] : raw[i];
 }
 
+static bool ray_is_valid(double value)
+{
+    return isfinite(value) && value > 0.0;
+}
+
 /*
 ** Force every reading into a usable range.
 **
-** A non-positive or non-finite reading is a sensor fault, not open space. We
-** collapse it to the floor distance so that the failure mode is "the car
-** thinks it is about to hit something and brakes", never "the car thinks the
-** road is clear and accelerates". Callers detect a wholly faulty scan by
-** noticing that every ray sits at the floor.
+** A non-positive or non-finite reading is a sensor fault, not open space, and
+** the two possible substitutions are not symmetric. Treating it as open road
+** makes the car accelerate at something it cannot see. So the fallback is the
+** floor distance -- "obstacle right here" -- and the failure mode is braking.
+**
+** But an *isolated* dead ray, with healthy neighbours either side, is a
+** dropout rather than a wall, and pretending it is an obstacle one millimetre
+** away is its own kind of wrong: it inflates the safety bubble to maximum for
+** that cycle and can erase a gap the car could have driven through. Measured
+** on a real track, that happened in 9 of 254 cycles. So isolated dropouts are
+** interpolated from their neighbours, and only a run of them collapses to the
+** floor.
+**
+** Callers still detect a wholly faulty scan by noticing every ray at the floor.
 */
 static void sanitise(double *ranges, const config_t *cfg)
 {
+    double source[N4S_LIDAR_RAYS];
+
+    memcpy(source, ranges, sizeof(source));
     for (size_t i = 0; i < N4S_LIDAR_RAYS; i++) {
-        if (!isfinite(ranges[i]) || ranges[i] <= 0.0)
-            ranges[i] = cfg->lidar_floor_mm;
+        double left = (i > 0) ? source[i - 1] : 0.0;
+        double right = (i + 1 < N4S_LIDAR_RAYS) ? source[i + 1] : 0.0;
+
+        if (!ray_is_valid(source[i])) {
+            if (ray_is_valid(left) && ray_is_valid(right))
+                ranges[i] = (left + right) / 2.0;
+            else if (ray_is_valid(left))
+                ranges[i] = left;
+            else if (ray_is_valid(right))
+                ranges[i] = right;
+            else
+                ranges[i] = cfg->lidar_floor_mm;
+        }
         ranges[i] = clampd(ranges[i], cfg->lidar_floor_mm, N4S_LIDAR_MAX_MM);
     }
 }
