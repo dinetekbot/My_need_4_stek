@@ -32,6 +32,7 @@ are the entire output. Everything between the two is in this repository.
 | [docs/05-simulator-setup.md](docs/05-simulator-setup.md) | Installing CoppeliaSim and the API, running a race |
 | [docs/06-tuning.md](docs/06-tuning.md) | Every knob, what it does, how to find a good value |
 | [docs/07-docker.md](docs/07-docker.md) | Running it in a container |
+| [docs/08-audit.md](docs/08-audit.md) | Why it is not fast yet, measured, and what would fix it |
 
 ---
 
