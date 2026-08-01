@@ -241,7 +241,11 @@ int main(int argc, char **argv)
     int parsed;
 
     config_defaults(&cfg);
-    parsed = config_parse_args(&cfg, argc, argv);
+    /* Environment first, command line second, so an explicit flag always
+    ** beats an exported default. */
+    parsed = config_parse_env(&cfg, "AI_OPTS");
+    if (parsed == 0)
+        parsed = config_parse_args(&cfg, argc, argv);
     if (parsed != 0) {
         config_usage(argv[0]);
         return (parsed > 0) ? 0 : EXIT_ERROR;

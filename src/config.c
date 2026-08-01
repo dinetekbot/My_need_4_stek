@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "config.h"
@@ -191,13 +192,15 @@ void config_usage(const char *program_name)
     log_line(line);
 }
 
-int config_parse_args(config_t *cfg, int argc, char **argv)
+/*
+** Apply one "--name=value" token. Returns 0 on success, 1 for --help,
+** -1 on a bad or unknown option (a message goes to stderr).
+*/
+static int parse_one(config_t *cfg, const char *argument)
 {
     char name[64];
     char message[256];
-
-    for (int i = 1; i < argc; i++) {
-        const char *argument = argv[i];
+    {
         const char *equals;
         const char *value = NULL;
         size_t length;
@@ -238,6 +241,41 @@ int config_parse_args(config_t *cfg, int argc, char **argv)
             log_line(message);
             return -1;
         }
+    }
+    return 0;
+}
+
+int config_parse_args(config_t *cfg, int argc, char **argv)
+{
+    for (int i = 1; i < argc; i++) {
+        int status = parse_one(cfg, argv[i]);
+
+        if (status != 0)
+            return status;
+    }
+    return 0;
+}
+
+int config_parse_env(config_t *cfg, const char *variable)
+{
+    const char *value = (variable != NULL) ? getenv(variable) : NULL;
+    char buffer[1024];
+    char *token;
+    char *save = NULL;
+
+    if (value == NULL || *value == '\0')
+        return 0;
+    /* strtok_r writes into its input, and the environment is not ours to
+    ** modify -- some libcs return a pointer straight into environ. */
+    strncpy(buffer, value, sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = '\0';
+    token = strtok_r(buffer, " \t\n", &save);
+    while (token != NULL) {
+        int status = parse_one(cfg, token);
+
+        if (status != 0)
+            return status;
+        token = strtok_r(NULL, " \t\n", &save);
     }
     return 0;
 }

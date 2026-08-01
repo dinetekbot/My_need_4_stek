@@ -56,5 +56,6 @@ void test_response(void);
 void test_perception(void);
 void test_control(void);
 void test_util(void);
+void test_config(void);
 
 #endif /* TEST_H */

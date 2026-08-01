@@ -134,6 +134,21 @@ void config_defaults(config_t *cfg);
 */
 int config_parse_args(config_t *cfg, int argc, char **argv);
 
+/*
+** Apply overrides from an environment variable holding a whitespace-separated
+** option list, e.g. AI_OPTS="--verbose --gap-threshold=600".
+**
+** This exists because the launcher shipped with the simulator API runs the
+** binary with no arguments and no way to add any. Without an environment
+** channel, using the documented launcher means accepting the defaults and
+** having no telemetry -- so tuning would require abandoning the official
+** workflow, which is the wrong trade.
+**
+** Same return values as config_parse_args. Command line options are applied
+** afterwards and therefore win.
+*/
+int config_parse_env(config_t *cfg, const char *variable);
+
 /* Print the full option list on stderr. */
 void config_usage(const char *program_name);
 

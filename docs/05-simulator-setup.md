@@ -60,11 +60,50 @@ doNotShowUpdateCheckMessage = true
 doNotShowCrashRecoveryMessage = true
 ```
 
-## One command
+## The standard workflow
 
-[`scripts/simulate.sh`](../scripts/simulate.sh) does the whole sequence:
-stops any simulator already running, starts a new one, waits for its API,
-loads and checks the scene, and races it.
+This is the procedure the project brief describes, and it works unchanged.
+
+```bash
+make                                     # produces ./ai
+cp ai /path/to/n4s_package/              # next to n4s, n4s_buffer, pipes.sh
+```
+
+Then, in CoppeliaSim: open a track scene, check `Simulation → Using the ODE
+physics engine`, and leave the simulation **stopped** — the AI starts it.
+
+```bash
+cd /path/to/n4s_package
+./pipes.sh
+```
+
+That is all. `pipes.sh` is the launcher shipped with the API; nothing in this
+repository replaces it, and `./ai` is an ordinary binary that reads the
+protocol on stdin and writes it on stdout.
+
+### Telemetry and tuning through pipes.sh
+
+`pipes.sh` runs the binary with no arguments and offers no way to add any, so
+options are read from `AI_OPTS` as well as from the command line:
+
+```bash
+AI_OPTS="--verbose" ./pipes.sh
+AI_OPTS="--verbose --gap-threshold=600 --laps=3" ./pipes.sh
+```
+
+Anything `./ai --help` lists works there. Command line options win over the
+environment, so `AI_OPTS` is a default you can export and still override.
+
+Verified end to end: `AI_OPTS="--verbose" ./pipes.sh` cleared
+`bootstrap_track` in 46 cycles.
+
+## The same thing in one command
+
+Everything below is optional. [`scripts/simulate.sh`](../scripts/simulate.sh)
+does the sequence above without the manual steps: it stops any simulator
+already running, starts a new one, waits for its API, loads and checks the
+scene, and races it. Useful for repeated runs and for headless work; the
+standard workflow remains the reference.
 
 ```bash
 export COPPELIASIM_ROOT=~/opt/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04

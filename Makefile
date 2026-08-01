@@ -39,7 +39,8 @@ TEST_SRC    := tests/main.c \
                tests/test_response.c \
                tests/test_perception.c \
                tests/test_control.c \
-               tests/test_util.c
+               tests/test_util.c \
+               tests/test_config.c
 
 OBJ         := $(SRC:.c=.o)
 LIB_OBJ     := $(LIB_SRC:.c=.o)

@@ -48,12 +48,22 @@ make test           # 1015 assertions, no simulator required
 and `make fclean` removes it.
 
 To actually drive, you also need the simulator and the API binaries — see
-[docs/05-simulator-setup.md](docs/05-simulator-setup.md). Once they are in
-place, one command starts the simulator on a scene and races it:
+[docs/05-simulator-setup.md](docs/05-simulator-setup.md). `./ai` is an
+ordinary binary speaking the protocol on stdin and stdout, so it runs under
+the launcher shipped with the API, unchanged:
+
+```bash
+cp ai /path/to/n4s_package/
+cd /path/to/n4s_package
+./pipes.sh                          # open a scene in CoppeliaSim first
+AI_OPTS="--verbose" ./pipes.sh      # pipes.sh takes no arguments; this does
+```
+
+There is also a wrapper that starts the simulator, loads a scene and races it
+in one command — optional, and described in the setup chapter:
 
 ```bash
 scripts/simulate.sh bootstrap_track -- --verbose
-scripts/simulate.sh --gui criss_cross              # with the window, to watch
 ```
 
 Real output from a cleared track:

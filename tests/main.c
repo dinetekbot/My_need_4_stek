@@ -17,6 +17,7 @@ int g_tests_failed = 0;
 int main(void)
 {
     test_util();
+    test_config();
     test_response();
     test_perception();
     test_control();
