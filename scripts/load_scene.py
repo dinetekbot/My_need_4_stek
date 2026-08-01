@@ -80,7 +80,12 @@ def scene_objects(sim, client):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("scene", help="path to a .ttt scene file")
+    parser.add_argument("scene", nargs="?",
+                        help="path to a .ttt scene file (omit with --check)")
+    parser.add_argument("--check", action="store_true",
+                        help="inspect the scene already open, load nothing. "
+                             "Use this with the windowed CoppeliaSim, which "
+                             "refuses to load a scene over the remote API")
     parser.add_argument("--coppeliasim",
                         default=os.environ.get("COPPELIASIM_ROOT"),
                         help="CoppeliaSim install root "
@@ -93,15 +98,19 @@ def main():
 
     if not args.coppeliasim:
         sys.exit("error: pass --coppeliasim or set COPPELIASIM_ROOT")
-    scene = os.path.abspath(os.path.expanduser(args.scene))
-    if not os.path.isfile(scene):
-        sys.exit("error: no such scene: %s" % scene)
-    # CoppeliaSim resolves this path itself, and its own launcher is known to
-    # mishandle spaces. Refusing early beats a silent empty scene.
-    if " " in scene:
-        sys.exit("error: the scene path contains a space: %s\n"
-                 "       CoppeliaSim mishandles those; move it elsewhere."
-                 % scene)
+    if not args.check and not args.scene:
+        sys.exit("error: give a scene path, or pass --check")
+    scene = None
+    if args.scene:
+        scene = os.path.abspath(os.path.expanduser(args.scene))
+        if not os.path.isfile(scene):
+            sys.exit("error: no such scene: %s" % scene)
+        # CoppeliaSim resolves this path itself, and its own launcher is known
+        # to mishandle spaces. Refusing early beats a silent empty scene.
+        if " " in scene:
+            sys.exit("error: the scene path contains a space: %s\n"
+                     "       CoppeliaSim mishandles those; move it elsewhere."
+                     % scene)
 
     staging = find_bindings(os.path.expanduser(args.coppeliasim))
     sys.path.insert(0, staging)
@@ -113,18 +122,22 @@ def main():
         sys.exit("error: cannot reach CoppeliaSim on %s:%d -- is it running?"
                  % (args.host, args.port))
 
-    if sim.simxLoadScene(client, scene, 0,
-                         sim.simx_opmode_blocking) != sim.simx_return_ok:
-        sim.simxFinish(client)
-        sys.exit("error: CoppeliaSim refused to load %s\n"
-                 "       the scene file itself may be unusable; try another."
-                 % os.path.basename(scene))
-    time.sleep(3)
+    if not args.check:
+        if sim.simxLoadScene(client, scene, 0,
+                             sim.simx_opmode_blocking) != sim.simx_return_ok:
+            sim.simxFinish(client)
+            sys.exit("error: CoppeliaSim refused to load %s\n"
+                     "       Two causes: the scene file is unusable (try\n"
+                     "       another), or this is the windowed CoppeliaSim,\n"
+                     "       which refuses remote scene loads. In the window,\n"
+                     "       use File > Open scene, then re-run with --check."
+                     % os.path.basename(scene))
+        time.sleep(3)
 
     names = scene_objects(sim, client)
     if not names:
         sim.simxFinish(client)
-        sys.exit("error: the scene loaded but contains no objects.")
+        sys.exit("error: no objects in the current scene -- nothing is loaded.")
 
     missing = [p for p in REQUIRED_PREFIXES
                if not any(n.startswith(p) for n in names)]
@@ -138,7 +151,8 @@ def main():
     sim.simxFinish(client)
     shutil.rmtree(staging, ignore_errors=True)
 
-    print("scene       %s" % os.path.basename(scene))
+    print("scene       %s" % (os.path.basename(scene) if scene
+                                else "(already open)"))
     print("objects     %d" % len(names))
     print("checkpoints %d" % checkpoints)
     print("engine      %s" % args.engine

@@ -60,6 +60,43 @@ doNotShowUpdateCheckMessage = true
 doNotShowCrashRecoveryMessage = true
 ```
 
+## One command
+
+[`scripts/simulate.sh`](../scripts/simulate.sh) does the whole sequence:
+stops any simulator already running, starts a new one, waits for its API,
+loads and checks the scene, and races it.
+
+```bash
+export COPPELIASIM_ROOT=~/opt/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04
+export API_DIR=~/n4s_package        # where n4s and n4s_buffer live
+
+scripts/simulate.sh bootstrap_track                 # headless, recommended
+scripts/simulate.sh --gui criss_cross               # with the window, to watch
+scripts/simulate.sh track_3 -- --gap-threshold=600  # options go to the AI
+```
+
+Scenes are looked up by name in `$SCENE_DIR` (default `~/opt/n4s-scenes`), or
+you can give a path. An unknown name lists what is available.
+
+It exists because the manual sequence has four ways to go subtly wrong, and
+three of them fail silently:
+
+- a second CoppeliaSim left running, so the two fight over port 19997 and the
+  API talks to whichever won — not necessarily the one holding your scene
+- launching from the wrong directory
+- forgetting that headless ignores the scene argument, and racing an empty
+  scene
+- racing a scene whose lidar does not work
+
+There is a fourth, subtler one the script handles: a killed instance keeps its
+listening socket for a moment, so "is the port up?" answers yes, you connect
+to the corpse, and the check two seconds later fails. The script waits for the
+port to *close* before starting the replacement, and then requires it to
+answer twice before believing it.
+
+The rest of this chapter is what the script does, for when you want to do it
+by hand or something goes wrong.
+
 ## Loading a scene
 
 The normal way, with the window open:

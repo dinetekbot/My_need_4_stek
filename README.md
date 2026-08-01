@@ -49,10 +49,11 @@ and `make fclean` removes it.
 
 To actually drive, you also need the simulator and the API binaries — see
 [docs/05-simulator-setup.md](docs/05-simulator-setup.md). Once they are in
-place:
+place, one command starts the simulator on a scene and races it:
 
 ```bash
-scripts/run.sh -- --verbose --laps=3
+scripts/simulate.sh bootstrap_track -- --verbose
+scripts/simulate.sh --gui criss_cross              # with the window, to watch
 ```
 
 Real output from a cleared track:
