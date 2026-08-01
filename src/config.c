@@ -91,6 +91,16 @@ static const option_t OPTIONS[] = {
 
 static const size_t OPTION_COUNT = sizeof(OPTIONS) / sizeof(OPTIONS[0]);
 
+/*
+** Column width for --help and the telemetry dump.
+**
+** Wide enough for the longest option name, which is not a constant anyone
+** should have to remember: a name longer than the hard-coded width silently
+** pushes its column out of line, and the table stops being readable exactly
+** when it grows enough to need to be.
+*/
+#define OPTION_NAME_WIDTH 22
+
 void config_defaults(config_t *cfg)
 {
     if (cfg == NULL)
@@ -172,11 +182,13 @@ void config_usage(const char *program_name)
         "Options:\n", program_name);
     log_line(line);
     for (size_t i = 0; i < OPTION_COUNT; i++) {
-        snprintf(line, sizeof(line), "  --%-20s %s\n",
+        snprintf(line, sizeof(line), "  --%-*s %s\n", OPTION_NAME_WIDTH,
             OPTIONS[i].name, OPTIONS[i].help);
         log_line(line);
     }
-    log_line("  --help                 show this message\n");
+    snprintf(line, sizeof(line), "  --%-*s show this message\n",
+        OPTION_NAME_WIDTH, "help");
+    log_line(line);
 }
 
 int config_parse_args(config_t *cfg, int argc, char **argv)
@@ -241,14 +253,14 @@ void config_dump(const config_t *cfg)
         const void *field = (const char *)cfg + OPTIONS[i].offset;
 
         if (OPTIONS[i].type == OPT_BOOL)
-            snprintf(line, sizeof(line), "  %-20s %s\n", OPTIONS[i].name,
-                *(const bool *)field ? "true" : "false");
+            snprintf(line, sizeof(line), "  %-*s %s\n", OPTION_NAME_WIDTH,
+                OPTIONS[i].name, *(const bool *)field ? "true" : "false");
         else if (OPTIONS[i].type == OPT_INT)
-            snprintf(line, sizeof(line), "  %-20s %d\n", OPTIONS[i].name,
-                *(const int *)field);
+            snprintf(line, sizeof(line), "  %-*s %d\n", OPTION_NAME_WIDTH,
+                OPTIONS[i].name, *(const int *)field);
         else
-            snprintf(line, sizeof(line), "  %-20s %.3f\n", OPTIONS[i].name,
-                *(const double *)field);
+            snprintf(line, sizeof(line), "  %-*s %.3f\n", OPTION_NAME_WIDTH,
+                OPTIONS[i].name, *(const double *)field);
         log_line(line);
     }
 }
