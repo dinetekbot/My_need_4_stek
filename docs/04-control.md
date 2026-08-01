@@ -280,6 +280,13 @@ it, so halting is not "set throttle to zero". Two real failures shaped it:
 line, reverses again. Observed: eighty cycles of shuffling between 950mm and
 1150mm. Fixed by backing up to a 25% margin, so ordinary coasting stays legal.
 
+*And the margin has to be latched.* Reaching it once is enough; re-checking
+the clearance every cycle re-creates the same loop one level up, because there
+is no brake — `CAR_FORWARD:0` stops driving, it does not hold the car still,
+so the car always rolls forward again. Measured on a real track: sixty cycles
+oscillating between 900mm and 1275mm, ended only by the ceiling below. The
+margin exists to absorb that roll; once earned, the car stops and settles.
+
 *The margin is not always reachable.* There is no rear sensor. The car
 reverses blind, and in a corner it wedges against a wall it cannot see, with
 the forward distance stuck short of the margin forever:

@@ -47,6 +47,7 @@ typedef struct {
     double        halt_best_mm;   /* best clearance reached while halting    */
     int           halt_stalls;    /* halting cycles that gained no clearance */
     int           halt_total;     /* total cycles spent halting              */
+    bool          halt_settled;   /* the required clearance was reached once */
     int           good_cycles;    /* consecutive untroubled racing cycles    */
     long          cycles;         /* total cycles executed                   */
     long          faulty_scans;   /* lidar reads with nothing usable in them */

@@ -356,12 +356,21 @@ static void step_halting(controller_t *ctl, const scan_t *scan,
         ctl->halt_stalls++;
     }
     /*
-    ** Once enough room has been reached at any point, stop reversing for
-    ** good. Continuing past it is how the car ends up backing around a bend
-    ** and losing the clearance it had already earned.
+    ** Once the margin has been reached, latch it and never reverse again.
+    **
+    ** The latch is the point. Without it, the car backs up to 1275mm, stops,
+    ** rolls forward to 975mm, drops below the legal line, and reverses again
+    ** -- measured on a real track, sixty cycles of that before the ceiling
+    ** cut it off. Reversing "just once more" is never once more, because
+    ** there is no brake: the throttle only stops driving, it does not hold
+    ** the car still.
+    **
+    ** The 25% margin exists precisely to absorb that roll, so once it has
+    ** been earned the right move is to stop and let the car settle, not to
+    ** chase the number every time it dips.
     */
-    if (ctl->halt_best_mm >= target && ctl->halt_cycles == 0)
-        ctl->halt_cycles = 1;
+    if (ctl->halt_best_mm >= target)
+        ctl->halt_settled = true;
     /*
     ** Still backing up towards the margin -- unless reversing has stopped
     ** achieving anything.
@@ -373,16 +382,9 @@ static void step_halting(controller_t *ctl, const scan_t *scan,
     ** stops gaining ground, we settle for the clearance we have, provided it
     ** is legal.
     */
-    if (ctl->halt_cycles == 0 && scan->forward_mm < target
+    if (!ctl->halt_settled && scan->forward_mm < target
         && !(legal && ctl->halt_stalls >= HALT_STALL_CYCLES)) {
         out->reverse = cfg->reverse_power;
-        return;
-    }
-    /* Settling, but coasted back below the legal line: recover the margin
-    ** and start the count again. */
-    if (scan->forward_mm < cfg->deadend_clearance_mm) {
-        out->reverse = cfg->reverse_power;
-        ctl->halt_cycles = 0;
         return;
     }
     ctl->halt_cycles++;

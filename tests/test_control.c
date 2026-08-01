@@ -495,6 +495,42 @@ static void test_escape_forward_phase_respects_the_wall(void)
 }
 
 /*
+** Reaching the margin is final: no chasing the number afterwards.
+**
+** Without a latch, the car backs up to the margin, stops, rolls forward past
+** the legal line -- there is no brake, only an absence of throttle -- and
+** reverses again. Measured on a real track: sixty cycles of oscillation
+** between 900mm and 1275mm, ended only by the ceiling.
+*/
+static void test_halting_does_not_chase_the_clearance(void)
+{
+    config_t cfg;
+    controller_t ctl;
+    scan_t scan;
+    gap_t gap;
+    command_t cmd;
+    int reversals = 0;
+
+    plain_config(&cfg);
+    controller_init(&ctl);
+    ctl.state = DRIVE_HALTING;
+    memset(&gap, 0, sizeof(gap));
+
+    /* Back up until the margin is comfortably reached. */
+    build_scan(&scan, &cfg, cfg.deadend_clearance_mm * 1.3);
+    controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+    /* Then roll forward below the legal line, as a real car does. */
+    build_scan(&scan, &cfg, cfg.deadend_clearance_mm * 0.9);
+    for (int i = 0; i < 20; i++) {
+        controller_step(&ctl, &scan, &gap, &cfg, &cmd);
+        if (cmd.reverse > 0.0)
+            reversals++;
+    }
+    CHECK(reversals == 0);
+    CHECK(ctl.state == DRIVE_FINISHED);
+}
+
+/*
 ** Halting must always terminate.
 **
 ** Reversing is blind. A car that backs out of a dead end and keeps going is
@@ -640,4 +676,5 @@ void test_control(void)
     test_halting_backs_off_to_legal_clearance();
     test_halting_tolerates_coasting();
     test_halting_always_terminates();
+    test_halting_does_not_chase_the_clearance();
 }
