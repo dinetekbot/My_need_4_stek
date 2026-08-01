@@ -86,12 +86,32 @@ like a broken installation, and it is not — it is one bad file. If the
 application appears to start but nothing responds, try a different scene
 before you start reinstalling libraries.
 
-### Headless
+### Headless — and why it is the recommended mode
 
-`-h` runs without a window. It is noticeably quicker — the same track that
-takes 88 control cycles and 55 seconds with the GUI takes 44 cycles and 22
-seconds headless, because nothing is being rendered — which makes it the
-better mode for tuning runs and the only sensible one for CI.
+`-h` runs without a window. It is quicker, and it is the mode this project is
+verified against: `bootstrap_track` clears in 34–43 cycles, run after run.
+
+**The windowed mode is less dependable, and honestly so.** It has cleared the
+same track (88 and 76 cycles on two occasions), but it has also, on a freshly
+launched instance with the identical scene, driven for a hundred cycles
+without reaching a single checkpoint — while headless cleared it immediately
+afterwards from the same code and the same scene file.
+
+That was investigated and not explained. The instance reported 258 objects,
+3 checkpoint sensors, the ODE engine and real-time mode off — indistinguishable
+from a healthy headless one. Driving it by hand through the API moved the car
+and reached speed 45. Lowering the throttle changed nothing. The cause is
+still unknown, so the recommendation is empirical rather than principled:
+
+- **use headless for anything you want to trust or repeat** — tuning, CI,
+  measuring a change
+- **use the window to watch**, and if the car makes no progress there, check
+  headless before suspecting your code
+
+Two things that are known to matter and are worth ruling out first: more than
+one CoppeliaSim instance running at once (they fight over port 19997, and
+`ss -ltnp | grep 19997` tells you which one won), and a run killed before it
+could send `STOP_SIMULATION`.
 
 The catch: **headless ignores the scene argument entirely.** Load the scene
 over the remote API instead. [`scripts/load_scene.py`](../scripts/load_scene.py)
