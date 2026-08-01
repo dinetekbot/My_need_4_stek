@@ -80,13 +80,25 @@ Measured over a real cleared run of 45 cycles:
 all of it `CAR_BACKWARDS:0.000` repeated into a car that is already not
 reversing.
 
-Fixing this is arithmetic, not research: skip an actuator command when the
-value has not moved by more than a small deadband. Expected gain, from the
-table above, is 0.464 → ~0.33 s per decision — **about 30% more decisions per
-metre**, for a few lines.
+Fixing this looked like arithmetic: skip an actuator command when the value
+has not moved by more than a small deadband. Expected gain, from the table
+above, 0.464 → ~0.33 s per decision.
 
-It will not, on its own, make the car smooth. Which brings us to the real
-problem.
+**It was tried, and it made the car strictly worse: 0 cleared runs out of 8,
+against 8 out of 8 without it.** Same scene, same binary otherwise,
+alternating runs.
+
+The measurement of waste is still correct. The inference that removing it is
+free was not. Every distance threshold, and the startup pace calibration
+itself, is calibrated against a cycle that costs four commands; make the cycle
+cheaper and the whole tuning is wrong at once, in the conservative direction
+— the car brakes far too early, crawls, trips the stuck detector and spends
+its life in the escape manoeuvre.
+
+The lesson is not "do not spend fewer commands". It is that the command budget
+and the distance tuning are one parameter, not two, and changing either alone
+invalidates the other. A real attempt has to re-derive the thresholds from the
+new cycle cost, and be measured over enough runs to see it.
 
 ## Finding 2 — the heading target is discontinuous, and that is the jerkiness
 
@@ -185,13 +197,16 @@ stops being load-bearing.
 Keep the bubble for safety, but soften it: attenuate rays near the closest
 obstacle instead of zeroing them, so the erased sector cannot teleport.
 
-### 2. Spend the command budget only on information — a few hours
+### 2. Spend the command budget only on information — and re-tune with it
 
 Send `WHEELS_DIR`, `CAR_FORWARD`, `CAR_BACKWARDS` only when the value has
-moved past a deadband. ~30% more decisions per metre, no behavioural risk.
-Measure the loop period from `GET_INFO_SIMTIME` occasionally rather than
-assuming it, and use the measured period in the derivative term — which is
-what the constant-round-trip rule was protecting, obtained honestly.
+moved past a deadband. ~30% more decisions per metre.
+
+**Not a free win, measured.** Done on its own it took the car from 8 cleared
+runs out of 8 to 0 out of 8, because every distance threshold is implicitly
+calibrated against the cost of a cycle. The braking distances have to be
+re-derived from the new, cheaper cycle at the same time — and the result
+measured over eight or more runs, not two.
 
 ### 3. Anticipate the corner instead of reacting to the wall — a day
 
@@ -216,6 +231,27 @@ is the standard way to get a smooth fast lap. This is a different project from
 follow-the-gap and should only be started once 1–4 are done and measured.
 
 ---
+
+## How to measure anything here
+
+`scripts/benchmark.sh N scene` runs the same race N times and reports the
+cleared rate and the spread of cycle counts.
+
+Use it. Single runs mislead in both directions: during this audit a change was
+judged a regression against a three-run baseline that had not been
+re-verified, and the same code later measured 8 out of 8. Conversely a change
+that looked harmless in three runs turned out to be 0 out of 8.
+
+For reference, the current code on `bootstrap_track`:
+
+```
+cleared  8/8  (100%)
+cycles   min 42  median 43  max 46
+```
+
+That spread is tight, so the setup is not inherently noisy — which means a
+change that costs half the cleared runs is a real regression and not bad luck.
+Two or three runs simply cannot see the difference.
 
 ## What this audit does not claim
 
