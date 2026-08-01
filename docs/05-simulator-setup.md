@@ -167,22 +167,43 @@ before you start reinstalling libraries.
 `-h` runs without a window. It is quicker, and it is the mode this project is
 verified against: `bootstrap_track` clears in 34–43 cycles, run after run.
 
-**The windowed mode is less dependable, and honestly so.** It has cleared the
-same track (88 and 76 cycles on two occasions), but it has also, on a freshly
-launched instance with the identical scene, driven for a hundred cycles
-without reaching a single checkpoint — while headless cleared it immediately
-afterwards from the same code and the same scene file.
+**The windowed mode gives the car less time to think, and that is measurable.**
+What matters to a controller is not wall-clock speed but how much *simulated*
+time passes between two decisions, because that is how far the car travels
+blind. Measured on one machine, one scene, forty identical cycles:
 
-That was investigated and not explained. The instance reported 258 objects,
-3 checkpoint sensors, the ODE engine and real-time mode off — indistinguishable
-from a healthy headless one. Driving it by hand through the API moved the car
-and reached speed 45. Lowering the throttle changed nothing. The cause is
-still unknown, so the recommendation is empirical rather than principled:
+| Mode | Simulated time / 40 cycles | Per decision |
+|---|---|---|
+| headless | 14.5 s | **0.36 s** |
+| windowed | 34.6 s | **0.87 s** |
 
-- **use headless for anything you want to trust or repeat** — tuning, CI,
-  measuring a change
-- **use the window to watch**, and if the car makes no progress there, check
-  headless before suspecting your code
+Both simulators run at roughly real time. The difference is the cost of a
+round trip: with the window open each exchange is slower, so fewer decisions
+fit into the same second of simulation. The windowed car covers nearly two and
+a half times the ground between decisions, cannot brake for the first corner,
+wedges itself against a wall — and the lidar then stops changing, which reads
+as *the robot does not move*.
+
+That is what the pace calibration at startup is for. The AI measures its own
+cycle period against the simulator, and scales the braking distances and the
+top speed to match:
+
+```
+[pace] 0.47 simulated s per cycle -- scaling x1.31: brake 784mm, slow 915mm,
+       fast 3010mm, throttle-max 0.42
+[pace] 1.06 simulated s per cycle -- scaling x2.95: brake 1772mm, slow 2067mm,
+       fast 3010mm, throttle-max 0.19
+```
+
+Braking earlier is only half of it: a car that gets fewer decisions per metre
+must also drive slower, or it covers the extra braking distance during the one
+cycle it cannot react in. Both are scaled. `--pace-reference=0` disables the
+measurement.
+
+**It helps, and it is not a cure.** With it, the windowed simulator went from
+a car that never left the first corner to two of three checkpoints and a clean
+stop. Headless still clears the track in 45 cycles. If you want a result you
+can compare against another, use headless; use the window to watch.
 
 Two things that are known to matter and are worth ruling out first: more than
 one CoppeliaSim instance running at once (they fight over port 19997, and

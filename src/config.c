@@ -80,6 +80,8 @@ static const option_t OPTIONS[] = {
         "failed recoveries before declaring a dead end"},
     {"recovery-reset", OPT_INT, offsetof(config_t, recovery_reset_cycles),
         "clean racing cycles that clear the recovery counter"},
+    {"pace-reference", OPT_DOUBLE, offsetof(config_t, pace_reference_s),
+        "simulated seconds per cycle the distances assume; 0 disables"},
     {"deadend-clearance", OPT_DOUBLE, offsetof(config_t, deadend_clearance_mm),
         "mm; required clearance before ending the simulation"},
     {"laps", OPT_INT, offsetof(config_t, lap_limit),
@@ -130,6 +132,7 @@ void config_defaults(config_t *cfg)
     cfg->escape_max_pairs = 4;
     cfg->deadend_attempts = 6;
     cfg->recovery_reset_cycles = 20;
+    cfg->pace_reference_s = 0.36;
     cfg->deadend_clearance_mm = 1000.0;
     cfg->lap_limit = 0;
     cfg->mirror = true;

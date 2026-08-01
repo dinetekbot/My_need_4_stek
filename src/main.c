@@ -19,6 +19,7 @@
 ** a third of its life waiting for answers it already has.
 */
 
+#include <math.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -169,6 +170,79 @@ static int probe_car(const config_t *cfg)
     return 0;
 }
 
+/*
+** Measure how much simulated time one control cycle actually costs, and
+** stretch the distance thresholds to match.
+**
+** The braking distances in the configuration are meaningless on their own.
+** What matters is how far the car travels between two decisions, and that
+** depends on how fast the simulator advances while we talk to it -- which is
+** a property of the simulator's mode, not of the car. Measured on one machine
+** and one scene: 0.36 simulated seconds per cycle headless, 0.87 with the
+** window open.
+**
+** A car that covers two and a half times the ground per decision needs to
+** start braking two and a half times earlier. Without this, the windowed
+** simulator drives straight into the first corner and wedges, and the
+** telemetry freezes -- which is indistinguishable from a car that never moved.
+**
+** The measurement runs the real cycle shape with the throttle at zero, so it
+** costs a few cycles and moves nothing.
+*/
+static void calibrate_pace(config_t *cfg)
+{
+    const int samples = 6;
+    double before = 0.0;
+    double after = 0.0;
+    double pace;
+    char line[192];
+
+    if (cfg->pace_reference_s <= 0.0)
+        return;
+    if (n4s_get_simtime(&before) != 0)
+        return;
+    for (int i = 0; i < samples; i++) {
+        double raw[N4S_LIDAR_RAYS];
+
+        if (n4s_get_lidar(raw) != 0
+            || n4s_set_wheels(0.0) != 0
+            || n4s_set_throttle(0.0) != 0
+            || n4s_set_reverse(0.0) != 0)
+            return;
+    }
+    if (n4s_get_simtime(&after) != 0 || after <= before)
+        return;
+    pace = ((after - before) / (double)samples) / cfg->pace_reference_s;
+    /* Below the reference there is nothing to fix, and an unbounded stretch
+    ** would turn a hiccup during calibration into a car that brakes for the
+    ** whole track. */
+    pace = clampd(pace, 1.0, 4.0);
+    /*
+    ** Braking earlier is only half the answer. A car that gets fewer
+    ** decisions per metre also has to drive slower, or it simply covers the
+    ** extra braking distance during the one cycle it cannot react in --
+    ** measured, it reaches the first checkpoint and then misses the corner
+    ** after it.
+    */
+    cfg->brake_dist_mm *= pace;
+    cfg->reverse_dist_mm *= pace;
+    cfg->dist_slow_mm *= pace;
+    /* Stretching this past the sensor's reach would mean the throttle never
+    ** reaches its maximum at all, since no reading can exceed 3010mm. */
+    cfg->dist_fast_mm = fmin(cfg->dist_fast_mm * pace, N4S_LIDAR_MAX_MM);
+    if (cfg->dist_slow_mm >= cfg->dist_fast_mm)
+        cfg->dist_slow_mm = cfg->dist_fast_mm * 0.5;
+    cfg->throttle_max = fmax(cfg->throttle_max / pace, cfg->throttle_min);
+    if (cfg->verbose || pace > 1.05) {
+        snprintf(line, sizeof(line),
+            "[pace] %.2f simulated s per cycle -- scaling x%.2f: brake %.0fmm, "
+            "slow %.0fmm, fast %.0fmm, throttle-max %.2f\n",
+            (after - before) / (double)samples, pace, cfg->brake_dist_mm,
+            cfg->dist_slow_mm, cfg->dist_fast_mm, cfg->throttle_max);
+        log_line(line);
+    }
+}
+
 /* One iteration of the race loop. Returns 0 to continue, 1 to stop, -1 on error. */
 static int race_cycle(controller_t *ctl, const config_t *cfg, int *faults,
     n4s_checkpoint_t *last_event)
@@ -268,6 +342,7 @@ int main(int argc, char **argv)
             "loaded and its simulation stopped.\n");
         return EXIT_ERROR;
     }
+    calibrate_pace(&cfg);
     controller_init(&ctl);
     if (race(&ctl, &cfg) != 0) {
         log_line("error: lost contact with the simulator\n");

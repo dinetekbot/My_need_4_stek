@@ -156,3 +156,18 @@ int n4s_get_speed_min(double *out)
 {
     return get_scalar("GET_CAR_SPEED_MIN", out);
 }
+
+int n4s_get_simtime(double *seconds)
+{
+    n4s_response_t response;
+
+    if (seconds == NULL)
+        return -1;
+    if (n4s_request("GET_INFO_SIMTIME", &response) != 0)
+        return -1;
+    if (!response.ok || !response.has_simtime)
+        return -1;
+    *seconds = (double)response.sim_seconds
+        + (double)response.sim_nanos / 1e9;
+    return 0;
+}

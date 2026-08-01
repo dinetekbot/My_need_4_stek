@@ -99,6 +99,23 @@ typedef struct {
     /* Stop after this many completed laps. 0 means "run until told to stop". */
     int    lap_limit;
 
+    /*
+    ** Simulated seconds per control cycle that the distances above assume.
+    **
+    ** The braking distances are only meaningful relative to how far the car
+    ** travels between two decisions, and that is not a property of the car --
+    ** it is a property of how fast the simulator advances while we talk to
+    ** it. Measured on the same machine and the same scene: 0.36 simulated
+    ** seconds per cycle headless, 0.87 with the window open. The windowed
+    ** car covers nearly two and a half times the ground between decisions,
+    ** cannot brake for the first corner, and wedges itself -- which reads as
+    ** "the robot does not move" because the lidar then stops changing.
+    **
+    ** So the pace is measured at startup and the distances are scaled by it.
+    ** Set to 0 to disable the measurement and use the distances as written.
+    */
+    double pace_reference_s;
+
     /* ---- plumbing ------------------------------------------------------ */
 
     /*

@@ -138,6 +138,9 @@ int n4s_get_wheels(double *out);
 int n4s_get_speed_max(double *out);
 int n4s_get_speed_min(double *out);
 
+/* GET_INFO_SIMTIME, as seconds. Returns -1 if the simulator has no answer. */
+int n4s_get_simtime(double *seconds);
+
 /*
 ** Every response passes through here, so the driving loop can learn about a
 ** checkpoint no matter which command triggered it. Returns the most advanced
