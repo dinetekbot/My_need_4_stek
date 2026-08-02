@@ -188,30 +188,36 @@ way down. `--throttle-max` defaults to 0.55 for that reason.
 Measured against CoppeliaSim 4.1 with the N4S API, ODE physics, default
 settings, at roughly two control cycles per second:
 
-| Scene | Result |
-|---|---|
-| `bootstrap_track` | **Track cleared**, 36–43 cycles, 3 runs of 3, zero recoveries |
-| `criss_cross` | 2 of 3 checkpoints, then a clean bounded stop |
-| `track_3` | drives 1205 cycles with 3 recoveries and no dead ends, reaching 2 of 12 checkpoints — safe but slow |
-| `track_4`, `diamond_bonus` | drive continuously for 380+ cycles, 0–7 recoveries, not run long enough to clear |
-| `track_1` | the scene itself will not load |
-| `track_2` | the scene's lidar returns nothing but zeros |
+| Scene | Checkpoints | Cleared | Behaviour |
+|---|---|---|---|
+| `bootstrap_track` | 3 | **8/8** | median 40 cycles |
+| `criss_cross` | 3 | 0/4 | reaches 2 of 3, then stops at the same spot every run |
+| `diamond_bonus` | 3 | 1/6 | reaches 2 of 3 |
+| `track_3` | 12 | 0/2 | 1 checkpoint, drives 200+ cycles without ever getting stuck |
+| `track_4` | 12 | 0/2 | 1 checkpoint, same |
+| `8_bonus` | 11 | 0/3 | 0–1 checkpoints, very tight corridors |
+| `track_1` | — | — | the scene will not load into CoppeliaSim at all |
+| `track_2` | — | — | the scene loads, its lidar returns only zeros |
 
-The two broken scenes are broken independently of this code: `track_1` fails
-to load into CoppeliaSim at all, and `track_2` loads but its sensor never
-reports. `track_1` is the scene the original project instructions tell you to
-open first.
+The two broken scenes are broken independently of this code, and `track_1` is
+the one the original project instructions tell you to open first.
 
-The honest reading of the long tracks: the car is **safe but slow** on them.
-It never wedges itself and never falsely declares a dead end, but it takes a
-lot of cycles per checkpoint. Follow-the-gap drives down the middle of the
-corridor rather than along a racing line, and the throttle is deliberately
-conservative because the control loop only runs at about two cycles per
-second. Going faster is a tuning exercise, and
-[docs/06-tuning.md](docs/06-tuning.md) says which knobs pay first.
+**Two distinct failure modes, and they want different fixes.** On the short
+tracks the car reaches two of three checkpoints and then meets one specific
+place it cannot get past — reproducibly, the same place every run, ending in a
+clean stop. That is a manoeuvring problem. On the long tracks it never gets
+stuck at all: it drives continuously for hundreds of cycles and simply does
+not get round in the time available. That is a speed problem.
 
-Every default was set from a measurement, not a guess, and that document
-records which measurement and why.
+Follow-the-gap drives down the middle of the corridor rather than along a
+racing line, and the control loop only runs at about two cycles per second —
+roughly one decision per metre travelled. [docs/08-audit.md](docs/08-audit.md)
+measures where that budget goes and what would buy the most back.
+
+Every default was set from a measurement, not a guess.
+[docs/06-tuning.md](docs/06-tuning.md) records which measurement and why, and
+`scripts/benchmark.sh` is how any change to them should be judged — single
+runs mislead badly here.
 
 ## Testing
 
