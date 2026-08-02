@@ -253,6 +253,45 @@ That spread is tight, so the setup is not inherently noisy — which means a
 change that costs half the cleared runs is a real regression and not bad luck.
 Two or three runs simply cannot see the difference.
 
+## Experiments run, and what they returned
+
+Everything below was measured with `scripts/benchmark.sh` over eight runs on
+`bootstrap_track`, against a baseline of 8 cleared out of 8 at a median of
+43 cycles.
+
+| Change | Cleared | Median cycles | Verdict |
+|---|---|---|---|
+| **Continuous aim** (centroid over the plateau, softened bubble, gap hysteresis) | 8/8 | **40** | **kept** |
+| Skip actuator commands that repeat a value | 0/8 | 43–238 | rejected |
+| Loosen the steering rate limit to 0.60 | 8/8 | 51 | rejected, 27% slower |
+| Lower the proportional gain to 1.0 | 4/7 | — | rejected |
+
+The negative results are the informative ones.
+
+**The sawing is not what it looked like.** The audit blamed a discontinuous
+setpoint. Making the setpoint continuous reduced the target's mean jump from
+8.3° to 7.1° and left the steering reversals at 70%, exactly where they were.
+So the reversals are not caused by the setpoint.
+
+The next suspect was the rate limiter: the commanded steering is clipped in
+69% of cycles while the car never uses more than 0.43 of the available lock,
+which looks like a saturated controller producing a triangle wave. Loosening
+it made the car slower and no smoother — the limiter simply clipped at a
+higher level, and the swings got bigger. Lowering the gain instead cost half
+the cleared runs.
+
+Three attempts to damp the oscillation each made the car worse. The honest
+reading is that **the reversals are functional, not pathological**: a car with
+60° of vision and one decision per metre, driving down the middle of a narrow
+corridor, corrects constantly because that is what staying in the middle
+requires. It looks like sawing on a telemetry trace. Damping it costs more
+than it buys, because every bit of damping is lag, and lag here is metres.
+
+That reframes the remaining work. The way to a smoother, faster car is not to
+filter the controller. It is to give it something better to follow —
+anticipation and memory, findings 3 and 5 — so that it *needs* fewer
+corrections.
+
 ## What this audit does not claim
 
 I have not seen the implementations being compared against. The findings above
