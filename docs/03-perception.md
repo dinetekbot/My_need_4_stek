@@ -94,6 +94,12 @@ The signature to look for is `near` collapsing while the steering keeps
 pushing in the same direction: that is a car steering confidently at what it
 believes is open space. Set `--mirror=0` if your setup is wired the other way.
 
+![The car in the corridor, seen from above](media/track-top.png)
+
+*What the 60° cone has to work with: a corridor a little over a metre wide,
+walls it cannot see once they are beside it, and checkpoints it only learns
+about after crossing them.*
+
 ## Stage 1 — cleaning
 
 ```c

@@ -8,6 +8,11 @@ dimensions. Thirty-two distances in a 60° cone in front of it, updated every
 cycle, are the entire input. Two numbers — steering angle and engine power —
 are the entire output. Everything between the two is in this repository.
 
+![A cleared run on bootstrap_track](docs/media/race.gif)
+
+*A full run, cleared in 66 control cycles. The pink bars are checkpoints; the
+car has never seen this track before and holds no map of it.*
+
 ```
    lidar (32 rays, 60°)              decision                actuators
   ╲   ╲   │   ╱   ╱

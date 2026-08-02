@@ -60,6 +60,11 @@ doNotShowUpdateCheckMessage = true
 doNotShowCrashRecoveryMessage = true
 ```
 
+![CoppeliaSim with a track scene loaded](media/coppeliasim-window.png)
+
+*CoppeliaSim with `bootstrap_track` open. Leave the simulation stopped — the
+AI starts it. The physics engine selector reads ODE in the toolbar.*
+
 ## The standard workflow
 
 This is the procedure the project brief describes, and it works unchanged.
