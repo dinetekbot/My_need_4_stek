@@ -116,13 +116,29 @@ def main():
     sys.path.insert(0, staging)
     import sim
 
-    sim.simxFinish(-1)
-    client = sim.simxStart(args.host, args.port, True, True, 5000, 5)
+    # Retry the connection. The remote API server does not free a client slot
+    # the instant the previous client disconnects, so two invocations close
+    # together -- exactly what a benchmark loop does -- see the second one
+    # refused even though the simulator is perfectly healthy.
+    client = -1
+    for attempt in range(10):
+        sim.simxFinish(-1)
+        client = sim.simxStart(args.host, args.port, True, True, 5000, 5)
+        if client != -1:
+            break
+        time.sleep(1)
     if client == -1:
-        sys.exit("error: cannot reach CoppeliaSim on %s:%d -- is it running?"
+        sys.exit("error: cannot reach CoppeliaSim on %s:%d after 10 tries.\n"
+                 "       Is it running, and is there only one instance?"
                  % (args.host, args.port))
 
     if not args.check:
+        # Stop anything still running first. CoppeliaSim refuses to load a
+        # scene over a live simulation, and a race killed by a timeout leaves
+        # one running -- so the load fails, the previous scene stays, and the
+        # next race silently runs on the wrong track.
+        sim.simxStopSimulation(client, sim.simx_opmode_blocking)
+        time.sleep(2)
         if sim.simxLoadScene(client, scene, 0,
                              sim.simx_opmode_blocking) != sim.simx_return_ok:
             sim.simxFinish(client)

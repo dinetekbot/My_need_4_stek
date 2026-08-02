@@ -48,8 +48,15 @@ echo "runs     $RUNS"
 echo
 
 for ((run = 1; run <= RUNS; run++)); do
-    COPPELIASIM_ROOT="$COPPELIASIM_ROOT" "$here/load_scene.py" "$scene_path" \
-        >/dev/null 2>&1 || true
+    # A failed load is not something to shrug at: the previous scene stays
+    # loaded and every remaining run silently races the wrong track. That
+    # happened, and produced two benchmarks of a scene that was never loaded.
+    if ! COPPELIASIM_ROOT="$COPPELIASIM_ROOT" "$here/load_scene.py" \
+            "$scene_path" >"$log_dir/load$run.txt" 2>&1; then
+        echo "error: could not load $SCENE before run $run" >&2
+        sed 's/^/       /' "$log_dir/load$run.txt" >&2
+        exit 1
+    fi
     sleep 2
     log="$log_dir/run$run.log"
     AI_OPTS="--verbose $AI_ARGS" API_DIR="$API_DIR" \
