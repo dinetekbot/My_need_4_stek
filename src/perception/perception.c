@@ -31,7 +31,7 @@
 ** part of the target plateau. Aiming at the single deepest ray makes the
 ** target jump between two nearly equal rays from one cycle to the next, and
 ** the car wags its way down the straight. */
-static const double PLATEAU_TOLERANCE_MM = 250.0;
+static const double PLATEAU_TOLERANCE_MM = 400.0;
 
 double ray_angle(size_t index, bool inverted)
 {
@@ -181,18 +181,66 @@ void scan_apply_bubble(scan_t *scan, const config_t *cfg)
     ** search still mean something in the situations that matter most. */
     half_angle = fmin(half_angle, N4S_LIDAR_FOV_DEG * 0.25);
     centre = scan->angles[scan->closest_index];
-    for (size_t i = 0; i < N4S_LIDAR_RAYS; i++)
-        if (fabs(scan->angles[i] - centre) <= half_angle)
-            scan->ranges[i] = 0.0;
+    /*
+    ** Attenuate rather than erase.
+    **
+    ** A hard cut makes the forbidden sector an on/off mask centred on a single
+    ** closest ray, and when two obstacles are nearly equidistant that ray
+    ** flips between them, so the mask teleports and the gap search changes its
+    ** mind. Fading smoothly -- nothing in the obstacle's own direction, full
+    ** range at the edge -- keeps the safety property while leaving the
+    ** distance field continuous for everything downstream.
+    */
+    for (size_t i = 0; i < N4S_LIDAR_RAYS; i++) {
+        double offset = fabs(scan->angles[i] - centre) / half_angle;
+
+        if (offset >= 1.0)
+            continue;
+        /* smoothstep: 0 at the obstacle, 1 at the edge, flat at both. */
+        scan->ranges[i] *= offset * offset * (3.0 - 2.0 * offset);
+    }
 }
 
-/* Longest run of rays reaching at least `threshold`. Returns false if none. */
-static bool longest_run(const double *ranges, double threshold,
+/*
+** Score an opening by the drivable space it offers: summed squared depth past
+** the threshold. Width and depth trade off in one number, and unlike "longest
+** run" it changes smoothly as a wall edge crosses a ray boundary rather than
+** stepping.
+*/
+static double run_score(const double *ranges, double threshold,
+    size_t begin, size_t end)
+{
+    double score = 0.0;
+
+    for (size_t i = begin; i <= end; i++) {
+        double depth = ranges[i] - threshold;
+
+        if (depth > 0.0)
+            score += depth * depth;
+    }
+    return score;
+}
+
+/*
+** Pick the opening to drive through: the best-scoring one, unless the car is
+** already committed to another that is nearly as good.
+**
+** Switching between two near-equal openings on alternate cycles is what makes
+** the heading target teleport across the cone. A rival has to beat the
+** incumbent by `hysteresis` of its score to take over.
+*/
+static bool best_run(const double *ranges, const double *angles,
+    double threshold, double previous, double hysteresis,
     size_t *begin, size_t *end)
 {
-    size_t best_len = 0;
+    double best = 0.0;
+    double incumbent = 0.0;
+    size_t inc_begin = 0;
+    size_t inc_end = 0;
+    bool has_incumbent = false;
     size_t run_start = 0;
     bool in_run = false;
+    bool found = false;
 
     for (size_t i = 0; i <= N4S_LIDAR_RAYS; i++) {
         bool open = (i < N4S_LIDAR_RAYS) && (ranges[i] >= threshold);
@@ -201,49 +249,78 @@ static bool longest_run(const double *ranges, double threshold,
             in_run = true;
             run_start = i;
         } else if (!open && in_run) {
+            size_t last = i - 1;
+            double score = run_score(ranges, threshold, run_start, last);
+
             in_run = false;
-            if (i - run_start > best_len) {
-                best_len = i - run_start;
+            if (score > best) {
+                best = score;
                 *begin = run_start;
-                *end = i - 1;
+                *end = last;
+                found = true;
+            }
+            if (isfinite(previous) && previous >= angles[run_start]
+                && previous <= angles[last] && score > incumbent) {
+                incumbent = score;
+                inc_begin = run_start;
+                inc_end = last;
+                has_incumbent = true;
             }
         }
     }
-    return best_len > 0;
+    if (has_incumbent && incumbent >= best * (1.0 - hysteresis)) {
+        *begin = inc_begin;
+        *end = inc_end;
+    }
+    return found;
 }
 
 /*
-** Within the chosen gap, aim at the middle of the deepest plateau: the
-** longest stretch of rays that all reach within PLATEAU_TOLERANCE_MM of the
-** gap's deepest ray.
+** Where to aim inside the chosen opening: a depth-weighted centroid over its
+** deepest plateau.
+**
+** Two mistakes are avoided here, and both were made on the way to it.
+**
+** Returning a ray *index* -- the middle of the plateau -- means the answer can
+** only be a multiple of 1.9 degrees, and it steps whenever the plateau shifts
+** by one ray. Measured on a real track: 8 to 10 degree jumps per cycle and a
+** steering reversal on half of them.
+**
+** But a centroid over the *whole* opening is wrong in a different way: it
+** splits the difference between the way through a corner and the near space
+** beside it, and the car cuts the corner.
+**
+** Restricting the centroid to the plateau keeps the old intent -- follow the
+** deep part, which is the corridor -- and makes the answer continuous.
 */
-static size_t plateau_centre(const double *ranges, size_t begin, size_t end)
+static double plateau_aim(const double *ranges, const double *angles,
+    double threshold, size_t begin, size_t end)
 {
     double deepest = ranges[argmax_range(ranges, begin, end + 1)];
-    double floor_value = deepest - PLATEAU_TOLERANCE_MM;
-    size_t best_begin = begin;
-    size_t best_end = begin;
-    size_t run_start = begin;
-    bool in_run = false;
+    double floor_value = fmax(deepest - PLATEAU_TOLERANCE_MM, threshold);
+    double weight_sum = 0.0;
+    double angle_sum = 0.0;
 
-    for (size_t i = begin; i <= end + 1; i++) {
-        bool high = (i <= end) && (ranges[i] >= floor_value);
+    for (size_t i = begin; i <= end; i++) {
+        double depth = ranges[i] - floor_value;
 
-        if (high && !in_run) {
-            in_run = true;
-            run_start = i;
-        } else if (!high && in_run) {
-            in_run = false;
-            if (i - run_start > best_end - best_begin + 1) {
-                best_begin = run_start;
-                best_end = i - 1;
-            }
-        }
+        if (depth <= 0.0)
+            continue;
+        weight_sum += depth * depth;
+        angle_sum += depth * depth * angles[i];
     }
-    return (best_begin + best_end) / 2;
+    if (weight_sum <= 0.0)
+        return angles[(begin + end) / 2];
+    return angle_sum / weight_sum;
 }
 
 void scan_find_gap(const scan_t *scan, const config_t *cfg, gap_t *gap)
+{
+    scan_find_gap_from(scan, cfg, NAN, gap);
+}
+
+void scan_find_gap_from(const scan_t *scan, const config_t *cfg,
+    double previous_angle, gap_t *gap)
 {
     size_t begin = 0;
     size_t end = 0;
@@ -251,14 +328,21 @@ void scan_find_gap(const scan_t *scan, const config_t *cfg, gap_t *gap)
     if (scan == NULL || cfg == NULL || gap == NULL)
         return;
     memset(gap, 0, sizeof(*gap));
-    if (!longest_run(scan->ranges, cfg->gap_threshold_mm, &begin, &end)) {
+    if (!best_run(scan->ranges, scan->angles, cfg->gap_threshold_mm,
+        previous_angle, cfg->gap_hysteresis, &begin, &end)) {
         gap->found = false;
         return;
     }
     gap->found = true;
     gap->begin = begin;
     gap->end = end;
-    gap->target = plateau_centre(scan->ranges, begin, end);
-    gap->target_angle = scan->angles[gap->target];
+    gap->target_angle = plateau_aim(scan->ranges, scan->angles,
+        cfg->gap_threshold_mm, begin, end);
+    /* The ray the aim falls closest to, for telemetry. */
+    gap->target = begin;
+    for (size_t i = begin; i <= end; i++)
+        if (fabs(scan->angles[i] - gap->target_angle)
+            < fabs(scan->angles[gap->target] - gap->target_angle))
+            gap->target = i;
     gap->depth_mm = scan->ranges[argmax_range(scan->ranges, begin, end + 1)];
 }

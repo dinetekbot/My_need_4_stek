@@ -36,6 +36,9 @@ typedef struct {
     drive_state_t state;
     double        last_wheels;
     double        last_error;     /* previous heading error, for the D term  */
+    /* Last heading actually aimed at, fed back to the gap search so it does
+    ** not swap openings for a marginal gain. NAN until the first one. */
+    double        last_target;
     int           stuck_cycles;   /* consecutive cycles making no progress   */
     int           halt_cycles;    /* consecutive cycles spent stationary     */
     /* ---- escape manoeuvre ---------------------------------------------- */

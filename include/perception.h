@@ -63,11 +63,24 @@ void scan_build(scan_t *scan, const double raw[N4S_LIDAR_RAYS],
 void scan_apply_bubble(scan_t *scan, const config_t *cfg);
 
 /*
-** Find the widest run of rays reaching at least cfg->gap_threshold_mm, then
-** aim at the middle of that run's deepest plateau. Aiming at the plateau
-** rather than at the single furthest ray keeps the target from flickering
-** between two nearly equal rays on every cycle.
+** Choose an opening and a direction to aim inside it.
+**
+** The opening is the best-scoring run of rays reaching past
+** cfg->gap_threshold_mm, scored by summed squared depth so width and depth
+** trade off continuously. The aim is a depth-weighted centroid over that
+** run's deepest plateau -- an angle, not a ray index, so it moves with the
+** distances instead of stepping by 1.9 degrees at a time.
 */
 void scan_find_gap(const scan_t *scan, const config_t *cfg, gap_t *gap);
+
+/*
+** Same, but told where the car was already aiming, so a rival opening must be
+** clearly better before the target is allowed to jump across the cone. Pass
+** NAN for no preference. `previous_angle` is in degrees, and must be the raw
+** previous target: a filtered one lags outside both openings and matches
+** neither, so the preference never engages.
+*/
+void scan_find_gap_from(const scan_t *scan, const config_t *cfg,
+    double previous_angle, gap_t *gap);
 
 #endif /* PERCEPTION_H */

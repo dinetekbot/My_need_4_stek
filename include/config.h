@@ -28,6 +28,17 @@ typedef struct {
     double bubble_mm;
     /* A ray must reach at least this far to count as drivable space. */
     double gap_threshold_mm;
+    /*
+    ** How much better a rival opening must score before the car switches to
+    ** it, as a fraction of the incumbent's score. 0 disables the preference.
+    **
+    ** Without it, the choice of opening flips between two near-equal
+    ** candidates as the car moves and the heading target teleports across the
+    ** cone. Measured before it existed: the target moved 8 to 10 degrees per
+    ** cycle on average against a sensor that resolves 1.9, and the steering
+    ** reversed sign on half of all cycles.
+    */
+    double gap_hysteresis;
 
     /* ---- steering ------------------------------------------------------ */
 

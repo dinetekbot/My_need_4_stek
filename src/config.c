@@ -40,6 +40,8 @@ static const option_t OPTIONS[] = {
         "mm; exclusion radius around the closest obstacle"},
     {"gap-threshold", OPT_DOUBLE, offsetof(config_t, gap_threshold_mm),
         "mm; a ray must reach this far to count as free space"},
+    {"gap-hysteresis", OPT_DOUBLE, offsetof(config_t, gap_hysteresis),
+        "score advantage a rival opening needs before the car switches"},
     {"kp", OPT_DOUBLE, offsetof(config_t, steer_kp),
         "steering proportional gain"},
     {"kd", OPT_DOUBLE, offsetof(config_t, steer_kd),
@@ -113,6 +115,7 @@ void config_defaults(config_t *cfg)
     cfg->smooth_window = 3;
     cfg->bubble_mm = 260.0;
     cfg->gap_threshold_mm = 800.0;
+    cfg->gap_hysteresis = 0.25;
     cfg->steer_kp = 1.50;
     cfg->steer_kd = 0.35;
     cfg->steer_balance = 0.12;

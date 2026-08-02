@@ -8,6 +8,7 @@
 ** wrong; a failing assertion on a hand-written scan tells you exactly.
 */
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -181,12 +182,19 @@ static void test_bubble_erases_around_closest(void)
     raw[5] = 300.0;
     scan_build(&scan, raw, &cfg);
     scan_apply_bubble(&scan, &cfg);
+    /* Nothing at all in the obstacle's own direction. */
     CHECK_NEAR(scan.ranges[5], 0.0, 1e-9);
-    CHECK_NEAR(scan.ranges[4], 0.0, 1e-9);
-    CHECK_NEAR(scan.ranges[6], 0.0, 1e-9);
-    /* The cap guarantees the far side of the cone survives, so a gap can
-    ** still be found when a wall is right against the car. */
-    CHECK(scan.ranges[N4S_LIDAR_RAYS - 1] > 0.0);
+    /* Its neighbours are strongly attenuated but not erased: attenuating
+    ** keeps the distance field continuous, so the forbidden sector cannot
+    ** teleport when the closest ray flips between two near-equidistant
+    ** obstacles. */
+    CHECK(scan.ranges[4] > 0.0 && scan.ranges[4] < 0.1 * 3000.0);
+    CHECK(scan.ranges[6] > 0.0 && scan.ranges[6] < 0.1 * 3000.0);
+    /* And the attenuation eases off monotonically with distance from it. */
+    CHECK(scan.ranges[6] < scan.ranges[7]);
+    CHECK(scan.ranges[7] < scan.ranges[8]);
+    /* The cap guarantees the far side of the cone survives untouched. */
+    CHECK_NEAR(scan.ranges[N4S_LIDAR_RAYS - 1], 3000.0, 1e-9);
 }
 
 static void test_gap_on_the_open_side(void)
@@ -263,8 +271,117 @@ static void test_target_is_stable_on_a_plateau(void)
     scan_build(&scan, raw, &cfg);
     scan_find_gap(&scan, &cfg, &second);
     /* A 5mm difference at the far end of a uniform wall of readings must not
-    ** swing the target from one side of the cone to the other. */
-    CHECK_NEAR(first.target_angle, second.target_angle, 1e-9);
+    ** swing the target across the cone. The aim is a continuous function of
+    ** the distances now, so it may move -- but by far less than the sensor
+    ** can resolve. */
+    CHECK_NEAR(first.target_angle, second.target_angle,
+        N4S_LIDAR_FOV_DEG / N4S_LIDAR_RAYS / 10.0);
+}
+
+/*
+** The aim is an angle, not a ray.
+**
+** The old version returned a ray index, so the answer could only be a
+** multiple of 1.9 degrees and stepped whenever the chosen ray changed.
+** Measured on a real track, that meant 8 to 10 degree jumps per cycle and a
+** steering reversal on half of them.
+*/
+static void test_target_is_continuous(void)
+{
+    config_t cfg;
+    scan_t scan;
+    gap_t gap;
+    double raw[N4S_LIDAR_RAYS];
+    double previous = 0.0;
+    int moved = 0;
+    int between_rays = 0;
+
+    plain_config(&cfg);
+    /* Deepen one edge of the opening gradually, within the band that counts,
+    ** and follow the aim. An index-based answer sits still and then jumps; a
+    ** centroid drifts. */
+    for (int step = 0; step < 20; step++) {
+        bool snapped = false;
+
+        fill(raw, 2800.0);
+        for (size_t i = 0; i < 14; i++)
+            raw[i] = 300.0;
+        raw[14] = 2405.0 + step * 20.0;
+        scan_build(&scan, raw, &cfg);
+        scan_find_gap(&scan, &cfg, &gap);
+        CHECK(gap.found);
+        if (step > 0) {
+            /* Never a jump: each increment moves the aim well under one ray,
+            ** where an index-based answer moved by zero or a whole ray. */
+            CHECK(fabs(gap.target_angle - previous)
+                < N4S_LIDAR_FOV_DEG / N4S_LIDAR_RAYS);
+            if (fabs(gap.target_angle - previous) > 1e-9)
+                moved++;
+        }
+        for (size_t i = 0; i < N4S_LIDAR_RAYS; i++)
+            if (fabs(gap.target_angle - scan.angles[i]) < 1e-9)
+                snapped = true;
+        if (!snapped)
+            between_rays++;
+        previous = gap.target_angle;
+    }
+    /* It moved on most steps, and spent most of them pointing between rays --
+    ** neither is possible when the answer is a ray index. */
+    CHECK(moved >= 15);
+    CHECK(between_rays >= 15);
+}
+
+/*
+** Do not switch openings for a marginal gain: two near-equal gaps otherwise
+** flip from cycle to cycle and the target teleports across the cone.
+*/
+static void test_gap_choice_has_hysteresis(void)
+{
+    config_t cfg;
+    scan_t scan;
+    gap_t gap;
+    double raw[N4S_LIDAR_RAYS];
+    double committed;
+
+    plain_config(&cfg);
+    fill(raw, 400.0);
+    for (size_t i = 2; i < 9; i++)
+        raw[i] = 2600.0;
+    for (size_t i = 22; i < 29; i++)
+        raw[i] = 2500.0;
+    scan_build(&scan, raw, &cfg);
+    scan_find_gap(&scan, &cfg, &gap);
+    CHECK(gap.found);
+    CHECK(gap.target_angle < 0.0);        /* the deeper one, on the left */
+    committed = gap.target_angle;
+
+    /* The right one becomes marginally better. Without hysteresis the target
+    ** would jump the width of the cone for almost nothing. */
+    for (size_t i = 22; i < 29; i++)
+        raw[i] = 2700.0;
+    scan_build(&scan, raw, &cfg);
+    scan_find_gap_from(&scan, &cfg, committed, &gap);
+    CHECK(gap.target_angle < 0.0);
+
+    /* A decisively better opening still wins. */
+    for (size_t i = 22; i < 29; i++)
+        raw[i] = 3010.0;
+    for (size_t i = 2; i < 9; i++)
+        raw[i] = 1000.0;
+    scan_build(&scan, raw, &cfg);
+    scan_find_gap_from(&scan, &cfg, committed, &gap);
+    CHECK(gap.target_angle > 0.0);
+
+    /* And with hysteresis off, the marginal gain is enough to switch. */
+    cfg.gap_hysteresis = 0.0;
+    fill(raw, 400.0);
+    for (size_t i = 2; i < 9; i++)
+        raw[i] = 2600.0;
+    for (size_t i = 22; i < 29; i++)
+        raw[i] = 2700.0;
+    scan_build(&scan, raw, &cfg);
+    scan_find_gap_from(&scan, &cfg, committed, &gap);
+    CHECK(gap.target_angle > 0.0);
 }
 
 void test_perception(void)
@@ -282,4 +399,6 @@ void test_perception(void)
     test_gap_centred_when_symmetric();
     test_no_gap_when_boxed_in();
     test_target_is_stable_on_a_plateau();
+    test_target_is_continuous();
+    test_gap_choice_has_hysteresis();
 }

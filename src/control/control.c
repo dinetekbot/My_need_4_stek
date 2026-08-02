@@ -59,6 +59,7 @@ void controller_init(controller_t *ctl)
         return;
     memset(ctl, 0, sizeof(*ctl));
     ctl->state = DRIVE_RACING;
+    ctl->last_target = NAN;
 }
 
 const char *drive_state_name(drive_state_t state)

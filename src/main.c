@@ -278,7 +278,11 @@ static int race_cycle(controller_t *ctl, const config_t *cfg, int *faults,
         return (n4s_set_throttle(0.0) == 0) ? 0 : -1;
     }
     scan_apply_bubble(&scan, cfg);
-    scan_find_gap(&scan, cfg, &gap);
+    /* Tell the search where we were already aiming, so it does not swap
+    ** openings for a marginal gain and teleport the target. */
+    scan_find_gap_from(&scan, cfg, ctl->last_target, &gap);
+    if (gap.found)
+        ctl->last_target = gap.target_angle;
     controller_step(ctl, &scan, &gap, cfg, &cmd);
     if (apply_command(&cmd) != 0)
         return -1;
