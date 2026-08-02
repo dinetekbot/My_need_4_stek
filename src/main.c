@@ -171,6 +171,36 @@ static int probe_car(const config_t *cfg)
 }
 
 /*
+** Warn if the race does not appear to be starting from the starting line.
+**
+** A simulator that has been running a while drifts: CoppeliaSim restores each
+** object to where it was when the simulation last started, so a run stopped
+** in the middle of the track makes *that* the new reference, and it cascades.
+** The car then begins its race nose-first against a wall, correctly concludes
+** it is stuck, and spends the whole run doing three-point turns -- which from
+** the outside looks like an AI driving at random.
+**
+** It cost hours to recognise from the outside. It costs one scan to say.
+*/
+static void check_starting_position(const config_t *cfg)
+{
+    double raw[N4S_LIDAR_RAYS];
+    scan_t scan;
+    char line[224];
+
+    if (n4s_get_lidar(raw) != 0)
+        return;
+    scan_build(&scan, raw, cfg);
+    if (scan.forward_mm >= cfg->brake_dist_mm)
+        return;
+    snprintf(line, sizeof(line),
+        "warning: only %.0fmm of clearance ahead at the start -- the car may "
+        "not be on the starting line.\n         Reload the scene (File > Open "
+        "scene, or scripts/load_scene.py) and try again.\n", scan.forward_mm);
+    log_line(line);
+}
+
+/*
 ** Measure how much simulated time one control cycle actually costs, and
 ** stretch the distance thresholds to match.
 **
@@ -346,6 +376,7 @@ int main(int argc, char **argv)
             "loaded and its simulation stopped.\n");
         return EXIT_ERROR;
     }
+    check_starting_position(&cfg);
     calibrate_pace(&cfg);
     controller_init(&ctl);
     if (race(&ctl, &cfg) != 0) {

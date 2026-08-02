@@ -61,13 +61,27 @@ int n4s_start_simulation(n4s_response_t *out)
 {
     n4s_response_t response;
 
+    /*
+    ** Stop whatever is running before starting, always.
+    **
+    ** A simulation already in progress is not something to join. Joining it
+    ** means the race begins wherever the car happens to have been left --
+    ** and it is left somewhere awkward precisely when the previous run was
+    ** killed rather than ended, which is the common case. Observed: a car
+    ** starting its race nose-first against a wall with 725mm of clearance
+    ** instead of the 3007mm of the starting line, immediately and correctly
+    ** concluding it was stuck, and spending the whole race doing three-point
+    ** turns. From the outside that looks like an AI driving at random.
+    **
+    ** Stopping first costs one command and makes every race start from the
+    ** line. A refusal here is fine and expected when nothing was running.
+    */
+    n4s_request("STOP_SIMULATION", NULL);
     for (int attempt = 0; attempt < START_ATTEMPTS; attempt++) {
         if (n4s_request("START_SIMULATION", &response) != 0)
             return -1;
         if (out != NULL)
             *out = response;
-        /* Being already up is a success from our point of view: it happens
-        ** when the simulation was started by hand before the AI was run. */
         if (response.ok || response.value_id == N4S_ID_ALREADY_RUNNING)
             return 0;
         /* A run that was interrupted can leave the previous simulation
