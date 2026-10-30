@@ -30,8 +30,13 @@ and the two actuator values are the entire interface.
 
 ## Demos
 
-- Track 4: [docs/media/track_4_demo.mp4](docs/media/track_4_demo.mp4)
-- Diamond: [docs/media/track_Dimond_demo.mp4](docs/media/track_Dimond_demo.mp4)
+**Track 4**
+
+<video src="docs/media/track_4_demo.mp4" controls width="720"></video>
+
+**Diamond**
+
+<video src="docs/media/track_Dimond_demo.mp4" controls width="720"></video>
 
 ---
 
