@@ -19,7 +19,6 @@ AI_ARGS=()
 
 COPPELIASIM_ROOT=${COPPELIASIM_ROOT:-$HOME/opt/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04}
 SCENE_DIR=${SCENE_DIR:-$HOME/opt/n4s-scenes}
-API_DIR=${API_DIR:-./vendor}
 
 usage() {
     cat >&2 <<'EOF'
@@ -36,7 +35,8 @@ Options:
 Environment:
   COPPELIASIM_ROOT  CoppeliaSim install directory
   SCENE_DIR         where the .ttt scenes live   (default: ~/opt/n4s-scenes)
-  API_DIR           where n4s and n4s_buffer live
+  N4S               path to the n4s binary       (default: ./n4s)
+  BUFFER            path to the n4s_buffer binary (default: ./n4s_buffer)
 
 Headless is the recommended mode. The windowed one is useful for watching the
 car, but it has been observed to drive without making progress on a scene that
@@ -154,4 +154,4 @@ else
 fi
 
 echo
-API_DIR="$API_DIR" "$(dirname "$0")/run.sh" -- "${AI_ARGS[@]}"
+"$(dirname "$0")/run.sh" -- "${AI_ARGS[@]}"

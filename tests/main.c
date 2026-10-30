@@ -17,10 +17,8 @@ int g_tests_failed = 0;
 int main(void)
 {
     test_util();
-    test_config();
+    test_car();
     test_response();
-    test_perception();
-    test_control();
 
     printf("\n%d checks, %d failed\n", g_tests_run, g_tests_failed);
     if (g_tests_failed > 0) {

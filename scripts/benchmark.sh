@@ -23,7 +23,6 @@ AI_ARGS="$*"
 
 COPPELIASIM_ROOT=${COPPELIASIM_ROOT:-$HOME/opt/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04}
 SCENE_DIR=${SCENE_DIR:-$HOME/opt/n4s-scenes}
-API_DIR=${API_DIR:-./vendor}
 TIMEOUT=${TIMEOUT:-170}
 
 here=$(dirname "$0")
@@ -59,7 +58,7 @@ for ((run = 1; run <= RUNS; run++)); do
     fi
     sleep 2
     log="$log_dir/run$run.log"
-    AI_OPTS="--verbose $AI_ARGS" API_DIR="$API_DIR" \
+    AI_OPTS="--verbose $AI_ARGS" \
         timeout "$TIMEOUT" "$here/run.sh" -- 2>"$log" || true
     n=$(grep -c '^\[0' "$log" || true)
     ok=$(grep -c 'TRACK CLEARED' "$log" || true)

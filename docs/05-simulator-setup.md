@@ -14,7 +14,7 @@ The AI is one of four processes. This chapter gets the other three running.
 
 **`n4s`, `n4s_buffer` and the scenes are not part of this repository.** They
 are third-party binaries and assets that are not ours to redistribute. Put
-them in `vendor/` (which is gitignored) or point `API_DIR` at wherever you
+them next to `ai`, or set `N4S` and `BUFFER`
 keep them.
 
 ## Installing CoppeliaSim
@@ -86,21 +86,20 @@ That is all. `pipes.sh` is the launcher shipped with the API; nothing in this
 repository replaces it, and `./ai` is an ordinary binary that reads the
 protocol on stdin and writes it on stdout.
 
-### Telemetry and tuning through pipes.sh
+### Telemetry through pipes.sh
 
-`pipes.sh` runs the binary with no arguments and offers no way to add any, so
-options are read from `AI_OPTS` as well as from the command line:
+`pipes.sh` runs the binary with no arguments and offers no way to add any. The
+current AI accepts one option, `--verbose`, so the useful invocation is:
 
 ```bash
 AI_OPTS="--verbose" ./pipes.sh
-AI_OPTS="--verbose --gap-threshold=600 --laps=3" ./pipes.sh
 ```
 
-Anything `./ai --help` lists works there. Command line options win over the
-environment, so `AI_OPTS` is a default you can export and still override.
+The simplified car has no tuning knobs on the command line. Its two threshold
+tables live in [`src/car.c`](../src/car.c); change a number there and rebuild.
 
 Verified end to end: `AI_OPTS="--verbose" ./pipes.sh` cleared
-`bootstrap_track` in 46 cycles.
+`bootstrap_track`.
 
 ## The same thing in one command
 
@@ -112,11 +111,10 @@ standard workflow remains the reference.
 
 ```bash
 export COPPELIASIM_ROOT=~/opt/CoppeliaSim_Edu_V4_1_0_Ubuntu20_04
-export API_DIR=~/n4s_package        # where n4s and n4s_buffer live
 
 scripts/simulate.sh bootstrap_track                 # headless, recommended
 scripts/simulate.sh --gui criss_cross               # with the window, to watch
-scripts/simulate.sh track_3 -- --gap-threshold=600  # options go to the AI
+scripts/simulate.sh track_3 -- --verbose            # options go to the AI
 ```
 
 Scenes are looked up by name in `$SCENE_DIR` (default `~/opt/n4s-scenes`), or
@@ -170,45 +168,13 @@ before you start reinstalling libraries.
 ### Headless — and why it is the recommended mode
 
 `-h` runs without a window. It is quicker, and it is the mode this project is
-verified against: `bootstrap_track` clears in 34–43 cycles, run after run.
+verified against: `bootstrap_track` clears in 8–11 cycles, run after run.
 
-**The windowed mode gives the car less time to think, and that is measurable.**
-What matters to a controller is not wall-clock speed but how much *simulated*
-time passes between two decisions, because that is how far the car travels
-blind. Measured on one machine, one scene, forty identical cycles:
-
-| Mode | Simulated time / 40 cycles | Per decision |
-|---|---|---|
-| headless | 14.5 s | **0.36 s** |
-| windowed | 34.6 s | **0.87 s** |
-
-Both simulators run at roughly real time. The difference is the cost of a
-round trip: with the window open each exchange is slower, so fewer decisions
-fit into the same second of simulation. The windowed car covers nearly two and
-a half times the ground between decisions, cannot brake for the first corner,
-wedges itself against a wall — and the lidar then stops changing, which reads
-as *the robot does not move*.
-
-That is what the pace calibration at startup is for. The AI measures its own
-cycle period against the simulator, and scales the braking distances and the
-top speed to match:
-
-```
-[pace] 0.47 simulated s per cycle -- scaling x1.31: brake 784mm, slow 915mm,
-       fast 3010mm, throttle-max 0.42
-[pace] 1.06 simulated s per cycle -- scaling x2.95: brake 1772mm, slow 2067mm,
-       fast 3010mm, throttle-max 0.19
-```
-
-Braking earlier is only half of it: a car that gets fewer decisions per metre
-must also drive slower, or it covers the extra braking distance during the one
-cycle it cannot react in. Both are scaled. `--pace-reference=0` disables the
-measurement.
-
-**It helps, and it is not a cure.** With it, the windowed simulator went from
-a car that never left the first corner to two of three checkpoints and a clean
-stop. Headless still clears the track in 45 cycles. If you want a result you
-can compare against another, use headless; use the window to watch.
+The windowed simulator is slower per decision — the car covers more ground
+between two commands — but the simple threshold algorithm is much less
+sensitive to that than the old controller was. Use headless when you want a
+result you can compare against another, and use the window when you want to
+watch the car drive.
 
 Two things that are known to matter and are worth ruling out first: more than
 one CoppeliaSim instance running at once (they fight over port 19997, and
@@ -283,28 +249,23 @@ button: `START_SIMULATION`, sent by the AI, does that.
 
 ```bash
 make
-API_DIR=~/n4s_package scripts/run.sh -- --verbose
+./pipe.sh -- --verbose
 ```
 
-The script builds the pipeline and starts driving. `--verbose` prints one
-telemetry line per cycle on stderr:
+The script builds the same ring as `pipes.sh` and starts driving. `--verbose`
+prints one telemetry line per cycle on stderr:
 
 ```
-[00031] RACING    fwd=  3007 near=   650 gap=yes@+006.6 wheels=+0.123 thr=0.513 rev=0.000 laps=0
-        >>> TRACK CLEARED (laps=0)
+[00001] fwd=  3010 left=   975 right=  1050 wheels=-0.005 thr=1.000
 ```
 
 | Field | Meaning |
 |---|---|
-| `[00031]` | Cycle number |
-| `RACING` | State machine state |
+| `[00001]` | Cycle number |
 | `fwd` | Distance straight ahead, mm |
-| `near` | Closest obstacle anywhere in the cone, mm |
-| `gap=yes@+006.6` | A gap was found, at +6.6° (right of centre) |
+| `left` / `right` | Edge-ray distances used to choose the steering sign |
 | `wheels` | `WHEELS_DIR` sent |
-| `thr` / `rev` | `CAR_FORWARD` / `CAR_BACKWARDS` sent |
-| `laps` | Completed laps |
-| `>>>` | A track progress event: checkpoint, lap, or track cleared |
+| `thr` | `CAR_FORWARD` sent |
 
 Ctrl-C stops the car and ends the simulation cleanly.
 
@@ -319,7 +280,7 @@ Ctrl-C stops the car and ends the simulation cleanly.
 A shell pipeline can only express a line, and we need a loop: the AI's output
 must reach the API, and the API's output must come back to the AI's input. The
 return path is a named pipe (FIFO), created by
-[`run.sh`](../scripts/run.sh) and removed when it exits.
+[`pipe.sh`](../pipe.sh) and removed when it exits.
 
 The two `buffer` processes are there because the API writes through buffered
 stdio. Between pipes that buffer is 4 KB, so its answer would sit in memory
@@ -328,7 +289,7 @@ no error message. `n4s_buffer` forwards byte by byte and breaks it. See
 [protocol, trap 2](01-protocol.md#2-buffered-stdout-deadlocks-the-pipeline)
 for why the AI never uses `printf` on stdout either.
 
-`run.sh` creates its FIFO with `mktemp -u`, so two runs on one machine do not
+`pipe.sh` creates its FIFO with `mktemp -u`, so two runs on one machine do not
 fight over the same pipe.
 
 ## Troubleshooting
@@ -341,9 +302,9 @@ fight over the same pipe.
 | `25:KO:Failed to load Map` | Scene not compatible with this build of CoppeliaSim |
 | Nothing happens, no output, no error | Buffering deadlock — something is writing to stdout through stdio |
 | CoppeliaSim starts but every API call errors | A corrupt scene, or a startup dialog. Try another scene first |
-| Car steers into walls, consistently | Left/right convention — add `--mirror`, see [perception](03-perception.md#which-end-is-the-left) |
+| Car steers into walls, consistently | The lidar ray order does not match the simulator; swap the left/right ray indices in `src/car.c` |
 | Car crawls, or does not move at all | A command outside its valid range is being rejected. Run with `N4S_DEBUG=1` to see the API's replies |
-| Car reaches a corner and stops | The safety bubble is erasing the whole cone. Lower `--bubble` |
+| Car reaches a corner and stops | No scene has this problem with the threshold controller; check the lidar is returning real distances |
 
 To check the protocol without any of the above, talk to the API by hand:
 
@@ -356,5 +317,3 @@ get_car_speed_max
 `GET_CAR_SPEED_MAX` and `GET_CAR_SPEED_MIN` answer even with no simulator
 attached, so a reply here proves the API binary itself is fine and narrows the
 problem to CoppeliaSim.
-
-Next: [6. Tuning](06-tuning.md)

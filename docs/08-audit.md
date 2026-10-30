@@ -1,5 +1,9 @@
 # 8. Audit: why this car is not fast, and what would fix it
 
+> **Legacy chapter.** These measurements describe the follow-the-gap controller
+> that was replaced. The current car is the simple threshold version; its
+> measured result on `bootstrap_track` is in the README.
+
 Written after seeing smoother, quicker runs of the same project elsewhere.
 Everything below is measured on this machine, this simulator and these scenes.
 No claim is made about anyone else's implementation — the numbers describe

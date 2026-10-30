@@ -23,12 +23,10 @@ LDLIBS      := -lm
 CFLAGS      += -MMD -MP
 
 SRC         := src/main.c \
-               src/config.c \
+               src/car.c \
                src/protocol/link.c \
                src/protocol/response.c \
                src/protocol/commands.c \
-               src/perception/perception.c \
-               src/control/control.c \
                src/util/util.c
 
 ## Everything except main.c, so the tests can link the real implementation
@@ -37,10 +35,8 @@ LIB_SRC     := $(filter-out src/main.c,$(SRC))
 
 TEST_SRC    := tests/main.c \
                tests/test_response.c \
-               tests/test_perception.c \
-               tests/test_control.c \
-               tests/test_util.c \
-               tests/test_config.c
+               tests/test_car.c \
+               tests/test_util.c
 
 OBJ         := $(SRC:.c=.o)
 LIB_OBJ     := $(LIB_SRC:.c=.o)

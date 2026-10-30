@@ -1,5 +1,10 @@
 # 4. Control
 
+> **Legacy chapter.** This describes the PD controller and recovery state
+> machine that were replaced. The current car uses a distance-to-power table
+> and a distance-to-lock table; see the README and
+> [architecture](02-architecture.md).
+
 Perception said where to go. Control decides what to do with the wheels and
 the throttle. Two independent laws, supervised by a small state machine.
 

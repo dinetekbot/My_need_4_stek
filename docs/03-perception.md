@@ -1,5 +1,10 @@
 # 3. Perception
 
+> **Legacy chapter.** This describes the follow-the-gap controller that was
+> replaced. The current car reads three rays and uses two threshold tables; see
+> the README and [architecture](02-architecture.md). Kept for the reasoning and
+> the measurements, not as a description of the current code.
+
 Everything the car knows about the world is 32 numbers, refreshed every cycle.
 This chapter is about turning them into a direction.
 

@@ -53,9 +53,7 @@ extern int g_tests_failed;
     } while (0)
 
 void test_response(void);
-void test_perception(void);
-void test_control(void);
+void test_car(void);
 void test_util(void);
-void test_config(void);
 
 #endif /* TEST_H */

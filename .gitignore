@@ -21,3 +21,7 @@ CoppeliaSim*/
 *.swp
 *~
 .DS_Store
+
+# Simulator API binaries (copied locally, not versioned)
+n4s
+n4s_buffer

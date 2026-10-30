@@ -1,5 +1,9 @@
 # 6. Tuning
 
+> **Legacy chapter.** The command-line knob table belongs to the controller
+> that was replaced. The current thresholds live in two arrays in
+> [`src/car.c`](../src/car.c) and are changed there. Kept for the tuning notes.
+
 Every threshold in this project is a command line option. Nothing is a magic
 number buried in a source file, and nothing requires a rebuild to change.
 

@@ -1,6 +1,6 @@
 # lidar-racer -- one command to build, test and run against a host CoppeliaSim.
 #
-#   docker compose run --rm racer -- --verbose --laps=3
+#   docker compose run --rm racer -- --verbose
 #
 # `network_mode: host` is not laziness: the n4s API opens a TCP connection to
 # 127.0.0.1:19997, where CoppeliaSim listens on the host. On the default
@@ -20,7 +20,8 @@ services:
       # Point this at wherever you unpacked them.
       - ${N4S_PACKAGE:-./vendor}:/opt/n4s:ro
     environment:
-      API_DIR: /opt/n4s
+      N4S: /opt/n4s/n4s
+      BUFFER: /opt/n4s/n4s_buffer
       AI: /app/ai
       N4S_DEBUG: ${N4S_DEBUG:-0}
     # Ctrl-C should stop the car, not orphan a pipeline of four processes.

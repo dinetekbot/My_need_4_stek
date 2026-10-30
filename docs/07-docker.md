@@ -51,7 +51,7 @@ code that does not pass.
 export N4S_PACKAGE=~/n4s_package
 
 # 3. Drive.
-docker compose run --rm racer -- --verbose --laps=3
+docker compose run --rm racer -- --verbose
 ```
 
 Without compose:
@@ -60,7 +60,7 @@ Without compose:
 docker build -t lidar-racer .
 docker run --rm --network=host \
     -v ~/n4s_package:/opt/n4s:ro \
-    lidar-racer -- --verbose --laps=3
+    lidar-racer -- --verbose
 ```
 
 ## Why `--network=host`
@@ -107,16 +107,15 @@ reap them, Ctrl-C leaves orphans behind.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `API_DIR` | `/opt/n4s` | Where `n4s` and `n4s_buffer` are mounted |
+
 | `AI` | `/app/ai` | Path to the AI binary |
-| `N4S` | `$API_DIR/n4s` | Override the API binary individually |
-| `BUFFER` | `$API_DIR/n4s_buffer` | Override the buffer binary individually |
+| `N4S` | `/opt/n4s/n4s` | Path to the n4s binary |
+| `BUFFER` | `/opt/n4s/n4s_buffer` | Path to the n4s_buffer binary |
 | `N4S_DEBUG` | `0` | Set to `1` to show the API's stderr |
 | `N4S_PACKAGE` | `./vendor` | Host path bind-mounted to `/opt/n4s` (compose only) |
 
-Everything after `--` on the command line goes to the AI unchanged, so every
-option in [tuning](06-tuning.md) works identically inside and outside the
-container.
+Everything after `--` on the command line goes to the AI unchanged, so
+`--verbose` works identically inside and outside the container.
 
 ## Reproducibility, honestly stated
 

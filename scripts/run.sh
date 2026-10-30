@@ -21,9 +21,8 @@
 set -euo pipefail
 
 AI=${AI:-./ai}
-API_DIR=${API_DIR:-./vendor}
-N4S=${N4S:-$API_DIR/n4s}
-BUFFER=${BUFFER:-$API_DIR/n4s_buffer}
+N4S=${N4S:-./n4s}
+BUFFER=${BUFFER:-./n4s_buffer}
 
 usage() {
     cat >&2 <<'EOF'
@@ -31,9 +30,8 @@ usage: scripts/run.sh [-- <ai options>]
 
 Environment:
   AI        path to the AI binary            (default: ./ai)
-  API_DIR   directory holding the API binaries (default: ./vendor)
-  N4S       path to the n4s binary           (default: $API_DIR/n4s)
-  BUFFER    path to the n4s_buffer binary    (default: $API_DIR/n4s_buffer)
+  N4S       path to the n4s binary           (default: ./n4s)
+  BUFFER    path to the n4s_buffer binary    (default: ./n4s_buffer)
   N4S_DEBUG set to 1 to show the API's own stderr chatter
 
 CoppeliaSim must already be running, with a track scene loaded and the ODE
@@ -41,8 +39,8 @@ physics engine selected. The API connects to it on 127.0.0.1:19997.
 
 Examples:
   scripts/run.sh
-  scripts/run.sh -- --verbose --laps=3
-  API_DIR=~/n4s_package scripts/run.sh -- --mirror
+  scripts/run.sh -- --verbose
+  N4S=~/n4s_package/n4s BUFFER=~/n4s_package/n4s_buffer scripts/run.sh
 EOF
 }
 
@@ -75,7 +73,7 @@ done
 
 if [[ ! -x "$N4S" || ! -x "$BUFFER" ]]; then
     echo "       n4s and n4s_buffer are not part of this repository." >&2
-    echo "       Point API_DIR at the directory holding them, or see" >&2
+    echo "       Put them next to ./ai, or set N4S and BUFFER. See" >&2
     echo "       docs/05-simulator-setup.md." >&2
 fi
 

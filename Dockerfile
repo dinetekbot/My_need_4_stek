@@ -49,7 +49,8 @@ RUN chmod +x /app/scripts/run.sh && chown -R racer:racer /app
 USER racer
 
 # The API binaries are bind-mounted here at run time rather than baked in.
-ENV API_DIR=/opt/n4s
+ENV N4S=/opt/n4s/n4s
+ENV BUFFER=/opt/n4s/n4s_buffer
 ENV AI=/app/ai
 
 ENTRYPOINT ["/app/scripts/run.sh"]

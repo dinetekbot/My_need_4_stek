@@ -9,153 +9,77 @@
                                      │
         ┌────────────────────────────┼────────────────────────────┐
         │                            │                            │
-┌───────▼────────┐          ┌────────▼─────────┐        ┌─────────▼────────┐
-│  src/protocol  │          │ src/perception   │        │   src/control    │
-│                │          │                  │        │                  │
-│ link.c    I/O  │          │ perception.c     │        │ control.c        │
-│ response.c     │          │                  │        │                  │
-│ commands.c     │          │ scan → gap       │        │ gap → commands   │
-└────────────────┘          └──────────────────┘        └──────────────────┘
+┌───────▼────────┐          ┌────────▼─────────┐                  │
+│  src/protocol  │          │     src/car.c    │                  │
+│                │          │                  │                  │
+│ link.c    I/O  │          │ scan -> power    │                  │
+│ response.c     │          │ scan -> steering │                  │
+│ commands.c     │          │                  │                  │
+└────────────────┘          └──────────────────┘                  │
         │                            │                            │
         └────────────────────────────┴────────────────────────────┘
                                      │
                           ┌──────────▼──────────┐
-                          │ src/util, src/config │
+                          │       src/util       │
                           └─────────────────────┘
 ```
 
-The dependency direction is strict: perception and control know nothing about
-the protocol. They take arrays of doubles and return numbers. That is what
-makes them testable without a simulator, and it is the difference between a
-project you can debug and one you can only stare at.
+The dependency direction is strict: `car.c` knows nothing about the protocol.
+It takes an array of doubles and returns two numbers, which is what makes it
+testable without a simulator.
 
 ## The cycle
 
 One iteration of the race loop, in full:
 
 ```c
-n4s_get_lidar(raw);                              /* 1 round trip  */
-scan_build(&scan, raw, &cfg);                    /* clean, smooth */
-if (scan_is_faulty(&scan, &cfg)) { ... }         /* sensor guard  */
-scan_apply_bubble(&scan, &cfg);                  /* safety        */
-scan_find_gap(&scan, &cfg, &gap);                /* where to go   */
-controller_step(&ctl, &scan, &gap, &cfg, &cmd);  /* what to do    */
-apply_command(&cmd);                             /* 3 round trips */
+n4s_get_lidar(raw);                    /* 1 round trip */
+car_step(raw, &cmd);                   /* two table lookups */
+n4s_set_throttle(cmd.throttle);        /* 1 round trip */
+n4s_set_wheels(cmd.wheels);            /* 1 round trip */
 ```
 
-Four round trips, every cycle, without exception. Even when the reverse
-command is zero and redundant, it is sent.
+Three round trips per cycle, no carried state, no planner. The previous
+version spent four and carried a gap search, a safety bubble, a PD controller
+and a recovery state machine. It was slower and it got stuck more often.
 
-That is a deliberate cost. It buys a **constant loop period**, and a constant
-period is what lets the derivative term of the steering controller be written
-as `error - last_error` rather than `(error - last_error) / measured_dt`. A
-jittery `dt` in a derivative term produces jittery steering; measuring `dt`
-accurately over a pipe is not worth the trouble when you can simply make the
-loop regular instead.
+## The decision
 
-It is also where the largest performance win lives. The temptation is to
-refresh everything the car knows on every cycle:
+`car_step()` reads three rays:
 
-```
-GET_INFO_LIDAR, GET_CURRENT_SPEED, GET_CURRENT_WHEELS,
-GET_CAR_SPEED_MAX, GET_CAR_SPEED_MIN            ← two constants, re-read forever
-WHEELS_DIR, CAR_FORWARD
-```
+| Ray | Meaning |
+|---|---|
+| `15` | straight ahead |
+| `1` | near the left wall |
+| `31` | near the right wall |
 
-Seven round trips instead of four, two of them for numbers that never change.
-The car reacts nearly half as often, which on a track shows up as
-understeering into corners it could have taken. Constants are read once at
-startup, in [`probe_car()`](../src/main.c).
+The forward distance selects a power tier and a steering-lock tier. The edge
+rays select the sign of the lock. There is nothing between the scan and the
+actuators except those two tables.
 
 ## Files
 
 | File | Responsibility |
 |---|---|
-| `src/main.c` | Race loop, signal handling, exit codes |
-| `src/config.c` | Defaults and the option table |
+| `src/main.c` | Race loop, signal handling, `--verbose`, exit codes |
+| `src/car.c` | Power and steering tables, `car_step()` |
 | `src/protocol/link.c` | Unbuffered `write`, one line in, one line out |
 | `src/protocol/response.c` | Parsing; the colon problem |
 | `src/protocol/commands.c` | Typed commands, argument clamping, lap counting |
-| `src/perception/perception.c` | Scan cleaning, safety bubble, gap search |
-| `src/control/control.c` | Steering law, throttle law, state machine |
-| `src/util/util.c` | Clamping, mapping, rate limiting, numeric parsing |
+| `src/util/util.c` | Clamping, numeric parsing, logging |
+| `pipe.sh` | The AI/API ring, same shape as the N4S launcher |
 
 Headers in `include/` carry the interface documentation; the `.c` files carry
 the reasoning. If you want to know *what* something does, read the header; if
 you want to know *why it is like that*, read the source.
 
-## The state machine
+## The two invariants worth preserving
 
-```
-            no forward progress for blind_cycles,
-            or forward < reverse_dist
-       ┌──────────────────────────────────────────┐
-       │                                          ▼
-  ┌────┴─────┐                            ┌───────────────┐
-  │  RACING  │                            │    ESCAPE     │
-  └────┬─────┘◄───────────────────────────┴───────┬───────┘
-       │  end of a forward phase, gap found,      │
-       │  and forward > reverse_dist × 1.8        │ escape_max_pairs
-       │                                          │ without getting out
-       ▼                                          │
-  ┌───────────┐◄──────────────────────────────────┘
-  │  HALTING  │  back off to a legal clearance, then settle
-  └────┬──────┘  (bounded: it always terminates)
-       │
-       ▼
-  ┌────────────┐
-  │  FINISHED  │  ← also entered directly on "Track Cleared" or lap limit
-  └────────────┘
-```
+**Never buffer stdout.** The AI sits in a ring of pipes. A `printf` that stays
+in libc's buffer while the AI waits for a reply is a deadlock with no error
+message. Everything on stdout goes through `write(2)`.
 
-`ESCAPE` is a three-point turn, not a reverse. See
-[control](04-control.md#the-escape-manoeuvre) for why the difference matters.
-
-The governing invariant is that **the car is never idle**: every racing cycle
-either commands forward motion or hands over to a recovery. Progress is
-measured from the commanded throttle rather than inferred from a distance
-threshold, which is what closes the band between "too close to accelerate" and
-"close enough to reverse" — a band the first version parked itself in.
-
-Three details that are easy to get wrong:
-
-**Hysteresis on the escape exit.** Leaving at exactly the distance that
-triggered the manoeuvre makes the car shuffle back and forth on the threshold
-forever. The exit needs 1.8× that distance, a visible gap, *and* a completed
-backing-up phase — abandoning the turn half way leaves the car pointing
-exactly where it was stuck.
-
-**Recoveries, not cycles.** A dead end is a number of failed recover-and-retry
-attempts, not a number of bad scans; and a clean stretch of racing clears the
-count, so a track full of tight corners cannot accumulate its way into a false
-dead end.
-
-**Clearance before halting, but bounded.** The rules require the car to come
-to rest at least three feet from the wall. `HALTING` backs up to a 25% margin
-— without it the car coasts back over the line and never settles — but it also
-gives up: once reversing stops gaining ground, and unconditionally after sixty
-cycles. Reversing is blind, and a car that backs out of a dead end and keeps
-going is just driving the track backwards; measured on a real track, the
-clearance rose to 1350mm, fell back to 500mm around a bend, and the phase ran
-297 cycles without ending. Stopping short of the ideal clearance is a poor
-result. Never stopping is not a result.
-
-## Failure handling
-
-| Situation | Response |
-|---|---|
-| Unparseable response line | Treated as a failed request |
-| Lidar reply with fewer than 32 values | Cycle skipped; driving on a partial scan is worse than not driving |
-| Every ray reads as faulty | Cycle skipped, throttle zeroed, and a warning printed — this is a broken sensor, not a car in a box. One supplied scene does exactly this, and failing silently in a loop is indistinguishable from a hang |
-| 100 consecutive bad reads | Give up, exit 84 |
-| Pipe closed | `SIGPIPE` ignored, so it surfaces as a write error we can report |
-| `SIGINT` / `SIGTERM` | Leave the loop, stop the car, end the simulation cleanly |
-
-Exit code is `0` when the race ends cleanly and `84` on any error.
-
-The important asymmetry: **a faulty reading collapses to "obstacle right
-here", never to "open road"**. Every ambiguous case resolves towards braking.
-A sensor glitch that reads as clear road at full throttle is how you put a car
-into a wall.
-
-Next: [3. Perception](03-perception.md)
+**Inspect every response for checkpoint news.** Progress is piggy-backed on
+the `ADDITIONAL_INFO` field of whatever reply happens to be next. Checking only
+a dedicated command means missing it, and missing "Track Cleared" means the
+car keeps driving after the race is over.
