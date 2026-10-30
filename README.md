@@ -32,11 +32,11 @@ and the two actuator values are the entire interface.
 
 **Track 4**
 
-<video src="docs/media/track_4_demo.mp4" controls width="640"></video>
+![Track 4 demo](docs/media/track_4_demo.gif)
 
 **Diamond**
 
-<video src="docs/media/track_Dimond_demo.mp4" controls width="640"></video>
+![Diamond demo](docs/media/track_Dimond_demo.gif)
 
 ---
 
