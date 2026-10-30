@@ -28,10 +28,17 @@ and the two actuator values are the entire interface.
 
 ---
 
+## Demos
+
+- Track 4: [docs/media/track_4_demo.mp4](docs/media/track_4_demo.mp4)
+- Diamond: [docs/media/track_Dimond_demo.mp4](docs/media/track_Dimond_demo.mp4)
+
+---
+
 ## Building and running
 
 ```bash
-make                # builds ./ai
+make re                # builds ./ai
 make test           # 111 assertions, no simulator required
 ```
 
