@@ -1,5 +1,7 @@
 # lidar-racer
 
+lidar-racer is inspired by the academic project Need4Stek, which I did in my first years at Epitech.
+
 This is a small autonomous race car. It sees with a 32-ray lidar, talks to the
 simulator over a text protocol, and drives with two tables of numbers. That is
 the whole trick.
@@ -32,11 +34,11 @@ and the two actuator values are the entire interface.
 
 **Track 4**
 
-![Track 4 demo](docs/media/track_4_demo.gif)
+<video src="docs/media/track_4_demo.mp4" controls width="640"></video>
 
 **Diamond**
 
-![Diamond demo](docs/media/track_Dimond_demo.gif)
+<video src="docs/media/track_Dimond_demo.mp4" controls width="640"></video>
 
 ---
 
